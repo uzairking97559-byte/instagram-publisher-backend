@@ -1,112 +1,510 @@
 require("dotenv").config();
+
+const crypto = require("node:crypto");
 const express = require("express");
+const { Pool } = require("pg");
 
 const app = express();
-app.use(express.json());
+app.disable("x-powered-by");
+app.use(express.json({ limit: "32kb" }));
 
 const PORT = process.env.PORT || 3000;
-const GRAPH_VERSION = "v24.0";
+const VERSION = process.env.META_GRAPH_VERSION || "v24.0";
+const APP_ID = process.env.META_APP_ID;
+const APP_SECRET = process.env.META_APP_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI;
+const KEY_TEXT = process.env.TOKEN_ENCRYPTION_KEY;
+const COOKIE = "igpub_session";
+const SESSION_AGE_DAYS = 30;
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
+      max: 5,
+      connectionTimeoutMillis: 5000
+    })
+  : null;
+let databaseReady = false;
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true, service: "instagram-publisher-backend" });
-});
+const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const randomToken = () => crypto.randomBytes(32).toString("base64url");
 
-app.get("/auth/meta/start", (req, res) => {
-  const redirectUri = process.env.REDIRECT_URI;
-  const appId = process.env.META_APP_ID;
+function encryptionKey() {
+  try {
+    const key = Buffer.from(KEY_TEXT || "", "base64");
+    return key.length === 32 ? key : null;
+  } catch {
+    return null;
+  }
+}
 
-  if (!redirectUri || !appId) {
-    return res.status(500).json({
-      error: "META_APP_ID and REDIRECT_URI must be configured"
+function encryptToken(value) {
+  const key = encryptionKey();
+  if (!key) throw new Error("Token encryption is not configured");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return [iv, cipher.getAuthTag(), ciphertext]
+    .map((part) => part.toString("base64url"))
+    .join(".");
+}
+
+function decryptToken(value) {
+  const key = encryptionKey();
+  if (!key) throw new Error("Token encryption is not configured");
+  const [iv, tag, ciphertext] = value.split(".");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(ciphertext, "base64url")),
+    decipher.final()
+  ]).toString("utf8");
+}
+
+function readCookies(req) {
+  const result = {};
+  for (const item of (req.headers.cookie || "").split(";")) {
+    const split = item.indexOf("=");
+    if (split < 1) continue;
+    try {
+      result[item.slice(0, split).trim()] = decodeURIComponent(item.slice(split + 1).trim());
+    } catch {}
+  }
+  return result;
+}
+
+function setSessionCookie(res, token, clear = false) {
+  const secure = process.env.NODE_ENV === "production" || process.env.RENDER === "true";
+  const age = clear ? 0 : SESSION_AGE_DAYS * 24 * 60 * 60;
+  res.setHeader(
+    "Set-Cookie",
+    `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure ? "; Secure" : ""}`
+  );
+}
+
+function storageReady() {
+  return Boolean(pool && databaseReady && encryptionKey());
+}
+
+async function initializeDatabase() {
+  if (!pool) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_sessions (
+      session_hash TEXT PRIMARY KEY,
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      state_hash TEXT PRIMARY KEY,
+      provider TEXT NOT NULL CHECK (provider IN ('facebook', 'instagram')),
+      session_hash TEXT NOT NULL REFERENCES app_sessions(session_hash) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS connected_accounts (
+      id BIGSERIAL PRIMARY KEY,
+      session_hash TEXT NOT NULL REFERENCES app_sessions(session_hash) ON DELETE CASCADE,
+      provider TEXT NOT NULL CHECK (provider IN ('facebook', 'instagram')),
+      account_id TEXT NOT NULL,
+      username TEXT,
+      display_name TEXT,
+      encrypted_token TEXT NOT NULL,
+      token_expires_at TIMESTAMPTZ,
+      scopes TEXT[] NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (session_hash, provider, account_id)
+    );
+    CREATE INDEX IF NOT EXISTS connected_accounts_session_idx
+      ON connected_accounts(session_hash);
+    CREATE TABLE IF NOT EXISTS publish_jobs (
+      id BIGSERIAL PRIMARY KEY,
+      session_hash TEXT NOT NULL REFERENCES app_sessions(session_hash) ON DELETE CASCADE,
+      account_row_id BIGINT NOT NULL REFERENCES connected_accounts(id) ON DELETE CASCADE,
+      creation_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'processing'
+        CHECK (status IN ('processing', 'publishing', 'published', 'failed')),
+      published_media_id TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  databaseReady = true;
+}
+
+function requireStorage(_req, res, next) {
+  if (!storageReady()) {
+    return res.status(503).json({
+      error: "Secure storage is not ready. Configure DATABASE_URL and a base64 32-byte TOKEN_ENCRYPTION_KEY."
     });
   }
+  next();
+}
 
-  const params = new URLSearchParams({
-    client_id: appId,
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management"
+async function requireSession(req, res, next) {
+  const token = readCookies(req)[COOKIE];
+  if (!token) return res.status(401).json({ error: "Connect an account first." });
+  try {
+    const sessionHash = hash(token);
+    const result = await pool.query(
+      "SELECT 1 FROM app_sessions WHERE session_hash = $1 AND expires_at > NOW()",
+      [sessionHash]
+    );
+    if (!result.rowCount) return res.status(401).json({ error: "Session expired. Connect again." });
+    req.sessionHash = sessionHash;
+    next();
+  } catch {
+    res.status(503).json({ error: "Secure storage is temporarily unavailable." });
+  }
+}
+
+function requireSameOrigin(req, res, next) {
+  try {
+    if (!req.get("origin") || new URL(req.get("origin")).host !== req.get("host")) {
+      return res.status(403).json({ error: "Origin check failed." });
+    }
+    next();
+  } catch {
+    res.status(403).json({ error: "Origin check failed." });
+  }
+}
+
+async function metaRequest(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    const error = new Error("Meta API request failed");
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+async function graphRequest(path, token, provider = "facebook", method = "GET", fields = {}) {
+  const host = provider === "instagram" ? "https://graph.instagram.com/" : "https://graph.facebook.com/";
+  const url = new URL(`${VERSION}/${path}`, host);
+  const params = { ...fields, access_token: token };
+  if (method === "GET") {
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    return metaRequest(url);
+  }
+  return metaRequest(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params)
   });
+}
 
-  res.redirect(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`);
-});
+async function beginOAuth(provider, req, res) {
+  if (!APP_ID || !APP_SECRET || !REDIRECT_URI || !storageReady()) {
+    return res.status(503).send("Secure storage is not configured yet.");
+  }
+  try {
+    const sessionToken = readCookies(req)[COOKIE] || randomToken();
+    const sessionHash = hash(sessionToken);
+    await pool.query(
+      `INSERT INTO app_sessions(session_hash, expires_at)
+       VALUES ($1, NOW() + INTERVAL '30 days')
+       ON CONFLICT (session_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+      [sessionHash]
+    );
+    setSessionCookie(res, sessionToken);
 
-app.get("/auth/meta/callback", async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.status(400).send("Missing OAuth code.");
+    const state = randomToken();
+    await pool.query(
+      `INSERT INTO oauth_states(state_hash, provider, session_hash, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')`,
+      [hash(state), provider, sessionHash]
+    );
+
+    const url = provider === "facebook"
+      ? new URL(`https://www.facebook.com/${VERSION}/dialog/oauth`)
+      : new URL("https://www.instagram.com/oauth/authorize");
+    url.searchParams.set("client_id", APP_ID);
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("state", state);
+    if (provider === "facebook") {
+      url.searchParams.set("scope", "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement");
+    } else {
+      url.searchParams.set("scope", "instagram_business_basic,instagram_business_content_publish");
+      url.searchParams.set("enable_fb_login", "0");
+      url.searchParams.set("force_authentication", "1");
+    }
+    res.redirect(url.toString());
+  } catch {
+    res.status(503).send("Could not start secure sign-in. Please try again.");
+  }
+}
+
+async function exchangeFacebookCode(code) {
+  const shortUrl = new URL(`https://graph.facebook.com/${VERSION}/oauth/access_token`);
+  for (const [key, value] of Object.entries({
+    client_id: APP_ID,
+    client_secret: APP_SECRET,
+    redirect_uri: REDIRECT_URI,
+    code
+  })) shortUrl.searchParams.set(key, value);
+  const shortToken = await metaRequest(shortUrl);
+
+  const longUrl = new URL(`https://graph.facebook.com/${VERSION}/oauth/access_token`);
+  for (const [key, value] of Object.entries({
+    grant_type: "fb_exchange_token",
+    client_id: APP_ID,
+    client_secret: APP_SECRET,
+    fb_exchange_token: shortToken.access_token
+  })) longUrl.searchParams.set(key, value);
+  return metaRequest(longUrl);
+}
+
+async function exchangeInstagramCode(code) {
+  const body = new URLSearchParams({
+    client_id: APP_ID,
+    client_secret: APP_SECRET,
+    grant_type: "authorization_code",
+    redirect_uri: REDIRECT_URI,
+    code
+  });
+  const shortToken = await metaRequest("https://api.instagram.com/oauth/access_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const longUrl = new URL("https://graph.instagram.com/access_token");
+  for (const [key, value] of Object.entries({
+    grant_type: "ig_exchange_token",
+    client_secret: APP_SECRET,
+    access_token: shortToken.access_token
+  })) longUrl.searchParams.set(key, value);
+  return { ...(await metaRequest(longUrl)), user_id: shortToken.user_id };
+}
+
+async function saveAccount(sessionHash, account) {
+  await pool.query(
+    `INSERT INTO connected_accounts
+      (session_hash, provider, account_id, username, display_name, encrypted_token, token_expires_at, scopes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (session_hash, provider, account_id) DO UPDATE SET
+       username=EXCLUDED.username, display_name=EXCLUDED.display_name,
+       encrypted_token=EXCLUDED.encrypted_token, token_expires_at=EXCLUDED.token_expires_at,
+       scopes=EXCLUDED.scopes, updated_at=NOW()`,
+    [
+      sessionHash,
+      account.provider,
+      String(account.id),
+      account.username || null,
+      account.name || null,
+      encryptToken(account.token),
+      account.expires ? new Date(Date.now() + Number(account.expires) * 1000) : null,
+      account.scopes
+    ]
+  );
+}
+
+async function oauthCallback(req, res) {
+  if (!storageReady()) return res.status(503).send("Secure storage is not configured yet.");
+  const { code, state, error } = req.query;
+  if (error) return res.status(400).send("Sign-in was cancelled or declined.");
+  if (typeof code !== "string" || typeof state !== "string") {
+    return res.status(400).send("Sign-in response is incomplete. Start again.");
+  }
 
   try {
-    const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`);
-    url.searchParams.set("client_id", process.env.META_APP_ID);
-    url.searchParams.set("client_secret", process.env.META_APP_SECRET);
-    url.searchParams.set("redirect_uri", process.env.REDIRECT_URI);
-    url.searchParams.set("code", code);
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json(data);
+    const browserHash = hash(readCookies(req)[COOKIE] || "");
+    const claimed = await pool.query(
+      `DELETE FROM oauth_states WHERE state_hash=$1 AND expires_at>NOW()
+       RETURNING provider, session_hash`,
+      [hash(state)]
+    );
+    const transaction = claimed.rows[0];
+    if (!transaction || transaction.session_hash !== browserHash) {
+      return res.status(400).send("This sign-in expired or was already used. Start again.");
     }
 
-    res.json({
-      message: "Meta authorization successful.",
-      note: "Store the access token securely; do not share it publicly.",
-      token_received: Boolean(data.access_token),
-      expires_in: data.expires_in || null
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (transaction.provider === "facebook") {
+      const token = await exchangeFacebookCode(code);
+      const pages = await graphRequest(
+        "me/accounts", token.access_token, "facebook", "GET",
+        { fields: "id,name,access_token,instagram_business_account{id,username}" }
+      );
+      let saved = 0;
+      for (const page of pages.data || []) {
+        const account = page.instagram_business_account;
+        if (!account || !page.access_token) continue;
+        await saveAccount(transaction.session_hash, {
+          provider: "facebook", id: account.id, username: account.username, name: page.name,
+          token: page.access_token, expires: token.expires_in,
+          scopes: ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"]
+        });
+        saved++;
+      }
+      if (!saved) return res.status(400).send("No Instagram professional account linked to an accessible Facebook Page was found.");
+    } else {
+      const token = await exchangeInstagramCode(code);
+      const profile = await graphRequest("me", token.access_token, "instagram", "GET", { fields: "user_id,username,name" });
+      await saveAccount(transaction.session_hash, {
+        provider: "instagram", id: profile.user_id || token.user_id || profile.id,
+        username: profile.username, name: profile.name, token: token.access_token,
+        expires: token.expires_in,
+        scopes: ["instagram_business_basic", "instagram_business_content_publish"]
+      });
+    }
+    res.redirect("/?connected=1");
+  } catch (error) {
+    const status = error.status >= 400 && error.status < 500 ? error.status : 502;
+    res.status(status).send("Meta sign-in failed. Start a fresh sign-in. Access tokens are never displayed or logged.");
   }
-});
+}
 
-app.post("/publish/image", async (req, res) => {
-  const { access_token, ig_user_id, image_url, caption = "" } = req.body;
-
-  if (!access_token || !ig_user_id || !image_url) {
-    return res.status(400).json({
-      error: "access_token, ig_user_id and image_url are required"
-    });
-  }
-
+function publicMediaUrl(value) {
   try {
-    const createUrl = `https://graph.facebook.com/${GRAPH_VERSION}/${ig_user_id}/media`;
-    const createParams = new URLSearchParams({
-      image_url,
-      caption,
-      access_token
-    });
+    const url = new URL(value);
+    return url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
 
-    const createResponse = await fetch(createUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: createParams
-    });
-    const creation = await createResponse.json();
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, service: "instagram-publisher-backend", secureStorageReady: storageReady() });
+});
 
-    if (!createResponse.ok) return res.status(createResponse.status).json(creation);
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1"><title>Instagram Publisher</title>
+    <style>*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0%,#392751,transparent 42%),#10131b;color:#f4f6fb;font:16px system-ui;min-height:100vh}main{max-width:860px;margin:auto;padding:36px 20px}.brand{color:#b7a4ef;letter-spacing:.14em;text-transform:uppercase;font-size:13px}h1{font-size:clamp(34px,7vw,56px);margin:18px 0 10px}.sub{color:#aab1c1;line-height:1.6}.card{margin-top:26px;padding:24px;border:1px solid #2a3040;border-radius:20px;background:#171c27;box-shadow:0 18px 70px #0004}.buttons{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.button{display:inline-block;padding:13px 17px;border-radius:12px;text-decoration:none;font-weight:700;background:#9b7cf6;color:#17121f}.button.alt{background:#252c3b;color:#fff}.item{padding:14px 0;border-top:1px solid #2b3140;display:flex;justify-content:space-between;gap:10px}.muted{color:#9ba4b7;font-size:13px}</style></head>
+    <body><main><div class="brand">Creator tools</div><h1>Instagram Publisher</h1>
+    <p class="sub">Connect a professional account through official Meta authorization. Access tokens stay on the server and are encrypted before storage.</p>
+    <section class="card"><h2>Connect an account</h2><div class="buttons">
+    <a class="button" href="/auth/meta/start">Continue with Facebook</a>
+    <a class="button alt" href="/auth/instagram/start">Continue with Instagram</a></div>
+    <div id="notice">Loading connected accounts…</div><div id="accounts"></div></section></main>
+    <script>(async()=>{const n=document.getElementById('notice'),a=document.getElementById('accounts');try{const r=await fetch('/api/accounts'),d=await r.json();if(!r.ok){n.textContent=d.error||'Connect an account to start.';return}n.textContent=d.accounts.length?d.accounts.length+' account(s) connected.':'No accounts connected yet.';a.innerHTML=d.accounts.map(x=>'<div class="item"><div><b>'+esc(x.username||'Instagram account')+'</b><div class="muted">'+esc(x.display_name||'')+'</div></div><span class="muted">'+(x.provider==='instagram'?'Instagram Login':'Facebook Login')+'</span></div>').join('')}catch{n.textContent='Could not load accounts.'}function esc(s){return String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]))}})()</script></body></html>`);
+});
 
-    const publishUrl = `https://graph.facebook.com/${GRAPH_VERSION}/${ig_user_id}/media_publish`;
-    const publishParams = new URLSearchParams({
-      creation_id: creation.id,
-      access_token
-    });
+app.get("/auth/meta/start", (req, res) => beginOAuth("facebook", req, res));
+app.get("/auth/instagram/start", (req, res) => beginOAuth("instagram", req, res));
+app.get("/auth/meta/callback", oauthCallback);
 
-    const publishResponse = await fetch(publishUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: publishParams
-    });
-    const published = await publishResponse.json();
-
-    if (!publishResponse.ok) return res.status(publishResponse.status).json(published);
-
-    res.json({ success: true, published });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+app.get("/api/accounts", requireStorage, requireSession, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id,provider,account_id,username,display_name,token_expires_at,updated_at
+       FROM connected_accounts WHERE session_hash=$1 ORDER BY updated_at DESC`,
+      [req.sessionHash]
+    );
+    res.json({ accounts: result.rows });
+  } catch {
+    res.status(503).json({ error: "Could not load connected accounts." });
   }
 });
 
-app.listen(PORT, () => {
+app.post("/auth/logout", requireSameOrigin, requireStorage, requireSession, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM app_sessions WHERE session_hash=$1", [req.sessionHash]);
+    setSessionCookie(res, "", true);
+    res.json({ ok: true });
+  } catch {
+    res.status(503).json({ error: "Could not end this session." });
+  }
+});
+
+app.post("/api/publish/image", requireSameOrigin, requireStorage, requireSession, async (req, res) => {
+  const { account_id, image_url, caption = "" } = req.body || {};
+  if (!account_id || typeof caption !== "string" || !publicMediaUrl(image_url)) {
+    return res.status(400).json({ error: "account_id and a public HTTPS image_url are required." });
+  }
+  try {
+    const found = await pool.query(
+      `SELECT account_id,provider,encrypted_token FROM connected_accounts
+       WHERE session_hash=$1 AND account_id=$2`,
+      [req.sessionHash, String(account_id)]
+    );
+    if (!found.rowCount) return res.status(404).json({ error: "That account is not connected to this session." });
+    const account = found.rows[0];
+    const token = decryptToken(account.encrypted_token);
+    const container = await graphRequest(`${account.account_id}/media`, token, account.provider, "POST", { image_url, caption });
+    const published = await graphRequest(`${account.account_id}/media_publish`, token, account.provider, "POST", { creation_id: container.id });
+    res.json({ success: true, published_media_id: published.id });
+  } catch {
+    res.status(502).json({ error: "Publishing failed. Check media URL, account eligibility, and granted permissions." });
+  }
+});
+
+app.post("/api/publish/reels", requireSameOrigin, requireStorage, requireSession, async (req, res) => {
+  const { account_id, video_url, caption = "" } = req.body || {};
+  if (!account_id || typeof caption !== "string" || !publicMediaUrl(video_url)) {
+    return res.status(400).json({ error: "account_id and a public HTTPS video_url are required." });
+  }
+  try {
+    const found = await pool.query(
+      `SELECT id,account_id,provider,encrypted_token FROM connected_accounts
+       WHERE session_hash=$1 AND account_id=$2`,
+      [req.sessionHash, String(account_id)]
+    );
+    if (!found.rowCount) return res.status(404).json({ error: "That account is not connected to this session." });
+    const account = found.rows[0];
+    const token = decryptToken(account.encrypted_token);
+    const container = await graphRequest(`${account.account_id}/media`, token, account.provider, "POST", {
+      media_type: "REELS", video_url, caption, share_to_feed: "true"
+    });
+    await pool.query(
+      "INSERT INTO publish_jobs(session_hash,account_row_id,creation_id) VALUES($1,$2,$3)",
+      [req.sessionHash, account.id, container.id]
+    );
+    res.status(202).json({ status: "processing", creation_id: container.id });
+  } catch {
+    res.status(502).json({ error: "Could not create the reel container." });
+  }
+});
+
+app.post("/api/publish/reels/:creationId/publish", requireSameOrigin, requireStorage, requireSession, async (req, res) => {
+  try {
+    const found = await pool.query(
+      `SELECT j.id,j.status,j.published_media_id,a.account_id,a.provider,a.encrypted_token
+       FROM publish_jobs j JOIN connected_accounts a ON a.id=j.account_row_id
+       WHERE j.session_hash=$1 AND j.creation_id=$2`,
+      [req.sessionHash, req.params.creationId]
+    );
+    if (!found.rowCount) return res.status(404).json({ error: "Reel container not found." });
+    const job = found.rows[0];
+    if (job.status === "published") return res.json({ success: true, published_media_id: job.published_media_id });
+    if (job.status === "publishing") return res.status(202).json({ status: "publishing" });
+    if (job.status === "failed") return res.status(422).json({ status: "failed" });
+    const token = decryptToken(job.encrypted_token);
+    const status = await graphRequest(`${req.params.creationId}?fields=status_code`, token, job.provider);
+    if (status.status_code === "ERROR" || status.status_code === "EXPIRED") {
+      await pool.query("UPDATE publish_jobs SET status='failed',updated_at=NOW() WHERE id=$1", [job.id]);
+      return res.status(422).json({ status: status.status_code });
+    }
+    if (status.status_code !== "FINISHED") return res.status(202).json({ status: status.status_code || "processing" });
+    const claimed = await pool.query(
+      "UPDATE publish_jobs SET status='publishing',updated_at=NOW() WHERE id=$1 AND status='processing' RETURNING id",
+      [job.id]
+    );
+    if (!claimed.rowCount) return res.status(202).json({ status: "publishing" });
+    const result = await graphRequest(`${job.account_id}/media_publish`, token, job.provider, "POST", { creation_id: req.params.creationId });
+    await pool.query("UPDATE publish_jobs SET status='published',published_media_id=$2,updated_at=NOW() WHERE id=$1", [job.id, result.id]);
+    res.json({ success: true, published_media_id: result.id });
+  } catch {
+    res.status(502).json({ error: "Could not publish this reel." });
+  }
+});
+
+app.use((_err, _req, res, _next) => res.status(500).json({ error: "Unexpected server error." }));
+
+app.listen(PORT, async () => {
+  if (pool) {
+    try {
+      await initializeDatabase();
+      console.log("Secure token storage connected.");
+    } catch {
+      databaseReady = false;
+      console.error("Secure token storage unavailable; OAuth and publishing are disabled.");
+    }
+  } else {
+    console.log("Secure token storage is not configured; OAuth and publishing are disabled.");
+  }
   console.log(`Instagram publisher backend running on port ${PORT}`);
+});
+
+process.on("SIGTERM", async () => {
+  if (pool) await pool.end().catch(() => {});
+  process.exit(0);
 });
