@@ -197,6 +197,22 @@ async function graphRequest(path, token, provider = "facebook", method = "GET", 
   });
 }
 
+async function getAllManagedPages(token) {
+  const pages = [];
+  let after;
+  for (let requestCount = 0; requestCount < 100; requestCount++) {
+    const fields = {
+      fields: "id,name,access_token,instagram_business_account{id,username}"
+    };
+    if (after) fields.after = after;
+    const result = await graphRequest("me/accounts", token, "facebook", "GET", fields);
+    pages.push(...(result.data || []));
+    after = result.paging && result.paging.cursors && result.paging.cursors.after;
+    if (!result.paging || !result.paging.next || !after) return pages;
+  }
+  throw new Error("Managed Page list exceeded the safe pagination limit");
+}
+
 async function beginOAuth(provider, req, res) {
   if (!APP_ID || !APP_SECRET || !REDIRECT_URI || !storageReady()) {
     return res.status(503).send("Secure storage is not configured yet.");
@@ -325,12 +341,9 @@ async function oauthCallback(req, res) {
 
     if (transaction.provider === "facebook") {
       const token = await exchangeFacebookCode(code);
-      const pages = await graphRequest(
-        "me/accounts", token.access_token, "facebook", "GET",
-        { fields: "id,name,access_token,instagram_business_account{id,username}" }
-      );
+      const pages = await getAllManagedPages(token.access_token);
       let saved = 0;
-      for (const page of pages.data || []) {
+      for (const page of pages) {
         const account = page.instagram_business_account;
         if (!account || !page.access_token) continue;
         await saveAccount(transaction.session_hash, {
