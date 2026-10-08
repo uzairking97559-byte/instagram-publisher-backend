@@ -41,7 +41,7 @@ The Meta app must have the products and permissions enabled for the intended tes
 - `GET /auth/meta/start` — start Facebook Login.
 - `GET /auth/instagram/start` — start Instagram Login.
 - `GET /auth/meta/callback` — shared OAuth callback; validates and consumes a one-time state value.
-- `GET /api/accounts` — list accounts connected to the browser session. Tokens are never returned.
+- `GET /api/accounts` — list accounts connected to the browser session. Tokens are never returned.\n- `DELETE /api/accounts/:accountId` — remove the local saved connection for one account; it does not revoke the permission at Meta.
 - `POST /auth/logout` — end the current browser session and remove its saved account records. Meta permissions are not revoked.
 - `POST /api/publish/image` — publish an image.
 - `POST /api/publish/reels` — create a reel container; returns its `creation_id`.
