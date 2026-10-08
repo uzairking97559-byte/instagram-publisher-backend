@@ -7,6 +7,12 @@ const { Pool } = require("pg");
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Frame-Options", "DENY");
+  next();
+});
 
 const PORT = process.env.PORT || 3000;
 const VERSION = process.env.META_GRAPH_VERSION || "v24.0";
@@ -308,12 +314,12 @@ async function oauthCallback(req, res) {
   try {
     const browserHash = hash(readCookies(req)[COOKIE] || "");
     const claimed = await pool.query(
-      `DELETE FROM oauth_states WHERE state_hash=$1 AND expires_at>NOW()
+      `DELETE FROM oauth_states WHERE state_hash=$1 AND session_hash=$2 AND expires_at>NOW()
        RETURNING provider, session_hash`,
-      [hash(state)]
+      [hash(state), browserHash]
     );
     const transaction = claimed.rows[0];
-    if (!transaction || transaction.session_hash !== browserHash) {
+    if (!transaction) {
       return res.status(400).send("This sign-in expired or was already used. Start again.");
     }
 
@@ -373,9 +379,33 @@ app.get("/", (_req, res) => {
     <p class="sub">Connect a professional account through official Meta authorization. Access tokens stay on the server and are encrypted before storage.</p>
     <section class="card"><h2>Connect an account</h2><div class="buttons">
     <a class="button" href="/auth/meta/start">Continue with Facebook</a>
-    <a class="button alt" href="/auth/instagram/start">Continue with Instagram</a></div>
+    <a class="button alt" href="/auth/instagram/start">Continue with Instagram</a>
+    <a class="button alt" href="/studio">Open publishing studio</a></div>
     <div id="notice">Loading connected accounts…</div><div id="accounts"></div></section></main>
     <script>(async()=>{const n=document.getElementById('notice'),a=document.getElementById('accounts');try{const r=await fetch('/api/accounts'),d=await r.json();if(!r.ok){n.textContent=d.error||'Connect an account to start.';return}n.textContent=d.accounts.length?d.accounts.length+' account(s) connected.':'No accounts connected yet.';a.innerHTML=d.accounts.map(x=>'<div class="item"><div><b>'+esc(x.username||'Instagram account')+'</b><div class="muted">'+esc(x.display_name||'')+'</div></div><span class="muted">'+(x.provider==='instagram'?'Instagram Login':'Facebook Login')+'</span></div>').join('')}catch{n.textContent='Could not load accounts.'}function esc(s){return String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]))}})()</script></body></html>`);
+});
+
+app.get("/studio", (_req, res) => {
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1"><title>Publishing Studio</title>
+    <style>*{box-sizing:border-box}body{margin:0;background:#10131b;color:#f4f6fb;font:16px system-ui}main{max-width:760px;margin:auto;padding:28px 18px}.muted{color:#aab1c1;line-height:1.55}.card{margin-top:20px;padding:22px;border:1px solid #2a3040;border-radius:18px;background:#171c27}label{display:block;margin:16px 0 7px;font-weight:650}input,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #3a4152;background:#10131b;color:#fff;font:inherit}textarea{min-height:100px;resize:vertical}button,.link{display:inline-block;margin-top:16px;padding:12px 16px;border:0;border-radius:10px;background:#9b7cf6;color:#17121f;font-weight:700;font:inherit;text-decoration:none;cursor:pointer}button:disabled{opacity:.55;cursor:wait}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}#status{white-space:pre-wrap;margin-top:16px;color:#c7cde0}.small{font-size:13px}</style></head>
+    <body><main><a class="link" href="/">← Dashboard</a><h1>Publishing Studio</h1>
+    <p class="muted">Authorized account par image ya reel publish karo. Media URL HTTPS par publicly reachable hona chahiye, taaki Meta file fetch kar sake.</p>
+    <section class="card"><form id="publishForm"><label for="account">Instagram account</label><select id="account" required><option value="">Accounts load ho rahe hain…</option></select>
+    <label for="kind">Post type</label><select id="kind"><option value="image">Photo</option><option value="reel">Reel</option></select>
+    <label for="mediaUrl">Public HTTPS media URL</label><input id="mediaUrl" type="url" placeholder="https://..." required>
+    <label for="caption">Caption</label><textarea id="caption" maxlength="2200" placeholder="Caption likho…"></textarea>
+    <div class="row"><button id="publishButton" type="submit">Publish</button><button id="checkButton" type="button" hidden>Check reel and publish</button><button id="logoutButton" type="button" class="link">Disconnect this browser</button></div>
+    <div id="status" role="status" aria-live="polite">Account list loading…</div></form></section></main>
+    <script>
+      const accountSelect=document.getElementById('account'),kind=document.getElementById('kind'),mediaUrl=document.getElementById('mediaUrl'),caption=document.getElementById('caption'),statusBox=document.getElementById('status'),publishButton=document.getElementById('publishButton'),checkButton=document.getElementById('checkButton');
+      let creationId='';
+      async function loadAccounts(){try{const r=await fetch('/api/accounts'),d=await r.json();accountSelect.replaceChildren();if(!r.ok){accountSelect.add(new Option('Connect an account from the dashboard',''));statusBox.textContent=d.error||'No connected accounts.';return}if(!d.accounts.length){accountSelect.add(new Option('No connected accounts',''));statusBox.textContent='Pehle dashboard se Instagram account connect karo.';return}accountSelect.add(new Option('Choose account',''));for(const x of d.accounts){const label=(x.username?'@'+x.username:'Instagram account')+' · '+(x.provider==='instagram'?'Instagram Login':'Facebook Login');accountSelect.add(new Option(label,x.account_id))}statusBox.textContent='Ready. Photo/reel ka public HTTPS URL paste karo.'}catch{statusBox.textContent='Account list load nahi hui. Dashboard se dobara try karo.'}}
+      document.getElementById('publishForm').addEventListener('submit',async e=>{e.preventDefault();if(!accountSelect.value){statusBox.textContent='Pehle connected account select karo.';return}publishButton.disabled=true;checkButton.hidden=true;creationId='';statusBox.textContent='Meta ko publish request bhej rahe hain…';try{const isReel=kind.value==='reel';const r=await fetch(isReel?'/api/publish/reels':'/api/publish/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:accountSelect.value,[isReel?'video_url':'image_url']:mediaUrl.value,caption:caption.value})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Publish request fail hui.');if(!isReel){statusBox.textContent='Photo publish ho gayi. Media ID: '+d.published_media_id;return}creationId=d.creation_id;checkButton.hidden=false;statusBox.textContent='Reel processing mein hai. Meta ready bataye to “Check reel and publish” dabao. Container: '+creationId}catch(err){statusBox.textContent=err.message}finally{publishButton.disabled=false}});
+      checkButton.addEventListener('click',async()=>{if(!creationId)return;checkButton.disabled=true;statusBox.textContent='Reel status check ho raha hai…';try{const r=await fetch('/api/publish/reels/'+encodeURIComponent(creationId)+'/publish',{method:'POST'});const d=await r.json();if(r.ok&&d.success){statusBox.textContent='Reel publish ho gayi. Media ID: '+d.published_media_id;checkButton.hidden=true;return}if(r.status===202){statusBox.textContent='Reel abhi processing mein hai ('+(d.status||'processing')+'). Thodi der baad dobara check karo.';return}statusBox.textContent=d.error||d.status||'Publish fail hui.'}catch{statusBox.textContent='Status check nahi hua. Thodi der baad phir try karo.'}finally{checkButton.disabled=false}});
+      document.getElementById('logoutButton').addEventListener('click',async()=>{if(!confirm('Is browser se connected accounts aur session remove kar doon?'))return;try{const r=await fetch('/auth/logout',{method:'POST'});if(r.ok){location.href='/';return}statusBox.textContent='Disconnect nahi ho paya.'}catch{statusBox.textContent='Disconnect nahi ho paya.'}});
+      loadAccounts();
+    </script></body></html>`);
 });
 
 app.get("/auth/meta/start", (req, res) => beginOAuth("facebook", req, res));
