@@ -29,7 +29,7 @@ Configure the exact callback URI:
 
 Enable the relevant official API products and permissions:
 
-- Facebook Login: `instagram_basic`, `instagram_content_publish`, `pages_show_list`, and `pages_read_engagement`. The Instagram professional account must be linked to a Facebook Page accessible to the authorizing user.
+- Facebook Login: `instagram_basic`, `instagram_content_publish`, `pages_show_list`, and `pages_read_engagement`. Each Instagram professional account must be linked to a Facebook Page accessible to the authorizing user. One Facebook authorization discovers all accessible linked accounts across paginated Page results.
 - Instagram Login: `instagram_business_basic` and `instagram_business_content_publish`. This is the direct Instagram sign-in flow and does not require the Facebook Page route.
 
 The Meta app must have the products and permissions enabled for the intended testers or approved users. Graph API version defaults to `v24.0` and can be changed with `META_GRAPH_VERSION`.
