@@ -37,12 +37,12 @@ The Meta app must have the products and permissions enabled for the intended tes
 ## Routes
 
 - `GET /health` — health status and whether secure storage is ready.
-- `GET /` — account connection dashboard.
+- `GET /` — account connection dashboard.\n- `GET /studio` — browser publishing studio for connected accounts.
 - `GET /auth/meta/start` — start Facebook Login.
 - `GET /auth/instagram/start` — start Instagram Login.
 - `GET /auth/meta/callback` — shared OAuth callback; validates and consumes a one-time state value.
 - `GET /api/accounts` — list accounts connected to the browser session. Tokens are never returned.
-- `POST /auth/logout` — end the current browser session and remove its saved accounts.
+- `POST /auth/logout` — end the current browser session and remove its saved account records. Meta permissions are not revoked.
 - `POST /api/publish/image` — publish an image.
 - `POST /api/publish/reels` — create a reel container; returns its `creation_id`.
 - `POST /api/publish/reels/:creationId/publish` — check container processing and publish once it is ready.
@@ -67,7 +67,7 @@ Example reel body:
 }
 ```
 
-The video URL must be publicly reachable by Meta while the container is processing. Poll the publish route with the returned `creation_id`; it responds with a processing status until Meta reports the container is ready.
+The photo and video URLs must use HTTPS and be publicly reachable by Meta. The `/studio` page accepts URLs; it does not upload local files. For reels, use the returned `creation_id` to check processing and publish when ready.
 
 ## Security notes
 
