@@ -1,17 +1,29 @@
 "use strict";
 
 require("dotenv").config();
-const { createApp } = require("./lib/app");
+const { createApp, isDatabaseConnectionError } = require("./lib/app");
 const { createDatabase } = require("./lib/database");
 
 async function start() {
   const log = (entry) => process.stdout.write(JSON.stringify(entry) + "\n");
-  const db = createDatabase(process.env, () => log({ event: "database_connection_error" }));
-  const app = await createApp({ db, logger: log });
+  let app = null;
+  const db = createDatabase(process.env, (error) => {
+    const code = isDatabaseConnectionError(error) ? error.code : null;
+    log({ event: "database_connection_error", ...(code ? { code } : {}) });
+    app?.locals.markDatabaseUnavailable();
+  });
+  app = await createApp({ db, logger: log });
   const server = app.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () => log({ event: "server_started" }));
   server.headersTimeout = 15000;
   server.requestTimeout = 180000;
-  const retry = setInterval(() => { void app.locals.initialize(); }, 60000);
+  let healthTicks = 0;
+  const retry = setInterval(() => {
+    if (!db) return;
+    if (!app.locals.isDatabaseReady() || ++healthTicks >= 12) {
+      healthTicks = 0;
+      void app.locals.initialize();
+    }
+  }, 5000);
   retry.unref();
   let stopping = false;
   const shutdown = () => {

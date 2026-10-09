@@ -47,15 +47,25 @@ let jobs = [];
 let progress = [];
 let busy = false;
 let pendingPollTimer = null;
+let lastNoticeCode = null;
 const timers = new Map();
 const attempts = new Map();
 
-function notice(text, error = false) {
+function notice(text, error = false, code = null) {
+  lastNoticeCode = error ? code : null;
   $("message").textContent = text;
   $("message").className = `notice${error ? " error" : ""}`;
   $("message").hidden = false;
 }
-function explain(error) { notice(messages[error.code] || "Request complete nahi hui. History check karke existing request dobara check karo.", true); }
+function explain(error) {
+  const code = error?.code || null;
+  notice(messages[code] || "Request complete nahi hui. History check karke existing request dobara check karo.", true, code);
+}
+function clearTemporaryUnavailable() {
+  if (lastNoticeCode !== "temporarily_unavailable") return;
+  $("message").hidden = true;
+  lastNoticeCode = null;
+}
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -115,21 +125,36 @@ function addAccountProgress(card, account) {
   card.append(block);
 }
 async function api(path, options = {}) {
-  let response;
-  try {
-    response = await fetch(path, { credentials: "same-origin", ...options,
-      headers: { "Content-Type": "application/json", ...options.headers }, signal: AbortSignal.timeout(35000) });
-  } catch { throw { code: "temporarily_unavailable" }; }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    if (response.status === 401 && data.error === "sign_in_required") {
-      for (const timer of timers.values()) clearTimeout(timer);
-      timers.clear();
-      $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
+  const readOnly = ["GET", "HEAD"].includes((options.method || "GET").toUpperCase());
+  const retryDelays = [500, 1000, 2000, 4000];
+  for (let attempt = 0; ; attempt++) {
+    let response;
+    try {
+      response = await fetch(path, { credentials: "same-origin", ...options,
+        headers: { "Content-Type": "application/json", ...options.headers }, signal: AbortSignal.timeout(35000) });
+    } catch (error) {
+      if (readOnly && error?.name !== "TimeoutError" && attempt < retryDelays.length) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+        continue;
+      }
+      throw { code: "temporarily_unavailable" };
     }
-    throw { code: data.error || "temporarily_unavailable" };
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401 && data.error === "sign_in_required") {
+        for (const timer of timers.values()) clearTimeout(timer);
+        timers.clear();
+        $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
+      }
+      const code = data.error || "temporarily_unavailable";
+      if (readOnly && response.status >= 500 && code === "temporarily_unavailable" && attempt < retryDelays.length) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+        continue;
+      }
+      throw { code };
+    }
+    return data;
   }
-  return data;
 }
 function renderAccounts() {
   const selected = $("account").value;
@@ -238,6 +263,7 @@ async function refresh() {
   const [accountData, jobData, progressData] = await Promise.all([api("/api/accounts"), api("/api/jobs"), api("/api/progress")]);
   accounts = accountData.accounts; jobs = jobData.jobs; progress = progressData.progress;
   renderAccounts(); renderJobs();
+  clearTemporaryUnavailable();
   const pending = jobs.some((job) => ["queued", "creating", "processing", "publishing"].includes(job.status));
   if (pending && !pendingPollTimer) pendingPollTimer = setInterval(() => { void refresh().catch(explain); }, 30000);
   if (!pending && pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
@@ -317,20 +343,35 @@ function updatePublishMode() {
 }
 async function uploadAsset(file, attempt) {
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
-  let response;
-  try {
-    response = await fetch("/api/assets", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "Idempotency-Key": key },
-      body: file, signal: AbortSignal.timeout(180000) });
-  } catch { throw { code: "temporarily_unavailable" }; }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    if (response.status === 401 && data.error === "sign_in_required") {
-      $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
+  const retryDelays = [500, 1000, 2000, 4000];
+  for (let retry = 0; ; retry++) {
+    let response;
+    try {
+      response = await fetch("/api/assets", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "Idempotency-Key": key },
+        body: file, signal: AbortSignal.timeout(180000) });
+    } catch (error) {
+      if (error?.name !== "TimeoutError" && retry < retryDelays.length) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[retry]));
+        continue;
+      }
+      throw { code: "temporarily_unavailable" };
     }
-    throw { code: data.error || "temporarily_unavailable" };
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401 && data.error === "sign_in_required") {
+        $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
+      }
+      const code = data.error || "temporarily_unavailable";
+      // Asset uploads use a stable idempotency key; retrying this step cannot publish a duplicate Reel.
+      if (response.status >= 500 && code === "temporarily_unavailable" && retry < retryDelays.length) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[retry]));
+        continue;
+      }
+      throw { code };
+    }
+    return data.asset;
   }
-  return data.asset;
 }
 
 async function boot() {
@@ -351,7 +392,7 @@ async function boot() {
 }
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault(); $("login-button").disabled = true;
-  try { await api("/auth/login", { method: "POST", body: JSON.stringify({ password: $("password").value }) }); $("password").value = ""; $("message").hidden = true; await boot(); }
+  try { await api("/auth/login", { method: "POST", body: JSON.stringify({ password: $("password").value }) }); $("password").value = ""; $("message").hidden = true; lastNoticeCode = null; await boot(); }
   catch (error) { explain(error); }
   finally { $("login-button").disabled = false; }
 });
