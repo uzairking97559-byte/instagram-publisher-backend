@@ -570,3 +570,26 @@ footer {
     font-size:12px
   }
 }
+
+.independence-notice a {
+  color:var(--lime);
+  text-decoration:underline;
+  text-underline-offset:3px
+}
+.about-panel {
+  max-width:800px;
+  margin:26px auto 50px
+}
+.about-panel p {
+  color:var(--muted)
+}
+.about-panel h2 {
+  margin-top:28px
+}
+.about-panel .about-back {
+  display:inline-block;
+  margin-top:10px;
+  color:var(--lime);
+  text-decoration:underline;
+  text-underline-offset:3px
+}
