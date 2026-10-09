@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#11161c">
+  <meta name="description" content="Independent publishing tool for Instagram professional accounts. Not affiliated with Meta, Instagram, or Facebook.">
   <meta name="google-site-verification" content="MROBwDCPPAiPYeE0p6GYG6FaPTRaJoPBAk2V28kVHMs">
   <title>Creator Publishing Tool</title>
   <link rel="stylesheet" href="/styles.css">
@@ -16,6 +17,10 @@
     <button id="logout" class="quiet" hidden>Sign out</button>
   </header>
   <main>
+    <aside class="independence-notice" aria-label="Service information">
+      <strong>Independent app · Meta se affiliation nahi hai.</strong>
+      <p>Yeh app Meta, Instagram ya Facebook ki official service nahi hai. Dashboard password sirf is app ke liye hai—Instagram/Facebook password yahan mat daalein. Account connect karne par sign-in Meta ke official page par hoga. <a href="/about.html">Service details</a>.</p>
+    </aside>
     <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
     <section id="loading" class="login-panel"><p class="eyebrow">CREATOR PUBLISHING TOOL</p><h1>Workspace khul raha hai…</h1></section>
     <section id="setup" class="login-panel" hidden>
@@ -27,20 +32,20 @@
       <p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Create. Connect.<br><span>Publish with control.</span></h1>
       <p>Apne connected Instagram professional accounts ko ek jagah manage karo.</p>
       <form id="login-form">
-        <label for="password">Dashboard password</label>
+        <label for="password">Private dashboard password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="Apna private dashboard password">
-        <p class="hint">Yeh workspace ka password hai. Instagram sign-in official Meta page par hoga.</p>
+        <p class="hint">Yeh password sirf is independent app ke dashboard ke liye hai. Instagram/Facebook password yahan mat daalein.</p>
         <button class="primary" id="login-button">Workspace kholo <span aria-hidden="true">↗</span></button>
       </form>
     </section>
     <div id="workspace" hidden>
       <nav class="tabs" aria-label="Workspace sections"><a href="#connections">Accounts</a><a href="#composer">Create post</a><a href="#activity">Activity</a></nav>
-      <section class="hero"><div><p class="eyebrow">YOUR CONTENT, IN ONE PLACE</p><h1>Ready when<br><span>inspiration strikes.</span></h1><p>Connect your accounts. Choose your audience.<br>Share your next photo or reel.</p></div><div class="hero-note"><span class="live-dot"></span>Official Meta authorization<span class="muted">Your accounts stay connected after sign-out.</span></div></section>
+      <section class="hero"><div><p class="eyebrow">YOUR CONTENT, IN ONE PLACE</p><h1>Ready when<br><span>inspiration strikes.</span></h1><p>Connect your accounts. Choose your audience.<br>Share your next photo or reel.</p></div><div class="hero-note"><span class="live-dot"></span>Meta ke official sign-in pages<span class="muted">Independent app · Not affiliated with Meta</span></div></section>
       <section id="connections" class="section">
         <div class="section-title"><div><p class="eyebrow">01 / CONNECTIONS</p><h2>Your Instagram accounts <span id="account-count" class="count">0</span></h2></div><button id="reload" class="quiet">Refresh</button></div>
         <div class="connect-options">
-          <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Accessible Pages se linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
-          <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Direct professional login · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
+          <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Official Facebook sign-in · Linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
+          <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Official Instagram sign-in · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
         </div>
         <div id="accounts" class="accounts"></div>
       </section>
@@ -64,7 +69,7 @@
           <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
         </section>
       </div>
-      <footer>Creator Publishing Tool <span>Private workspace · Official APIs</span></footer>
+      <footer>Creator Publishing Tool <span>Independent service · Uses Meta’s published APIs</span></footer>
     </div>
   </main>
 </body>
