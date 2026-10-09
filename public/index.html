@@ -55,12 +55,24 @@
           <p class="eyebrow">02 / CREATE</p><h2>Your next post.</h2><p class="muted">Ek account chuno aur publish karne se pehle details check karo.</p>
           <form id="publish-form">
             <label for="account">Instagram account</label><select id="account" required><option value="">Pehle account connect karo</option></select>
-            <label for="media-type">Post type</label><select id="media-type"><option value="image">Photo</option><option value="reel">Reel</option></select>
-            <label for="media-url">Public HTTPS media link</label><input id="media-url" type="url" required maxlength="4096" placeholder="https://your-media-site.com/photo.jpg">
-            <p class="hint">Photo: JPEG. Reel: compatible video. Link Meta ko bina login ke khulna chahiye. Local file upload abhi available nahi hai.</p>
+            <label for="upload-mode">Publish mode</label>
+            <select id="upload-mode"><option value="batch">Bulk reels · phone se files</option><option value="single">Single post · public link</option></select>
+            <div id="batch-options">
+              <label for="reel-files">Reel videos · ek saath chuno</label>
+              <input id="reel-files" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple>
+              <p id="file-summary" class="hint">1–10 MP4/MOV files. Har file 50 MB tak; pending uploads ke liye total storage limit 500 MB hai.</p>
+              <label for="interval-minutes">Har reel ke beech gap</label>
+              <select id="interval-minutes"><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option></select>
+              <p class="hint">Pehli reel turant queue hogi; baaki chune hue gap se. Render Free service soyi ho to schedule late ho sakta hai.</p>
+            </div>
+            <div id="single-options" hidden>
+              <label for="media-type">Post type</label><select id="media-type"><option value="image">Photo</option><option value="reel">Reel</option></select>
+              <label for="media-url">Public HTTPS media link</label><input id="media-url" type="url" maxlength="4096" placeholder="https://your-media-site.com/photo.jpg">
+              <p class="hint">Link Meta ko bina login ke khulna chahiye.</p>
+            </div>
             <label for="caption">Caption <span id="caption-count" class="muted">0 / 2200</span></label><textarea id="caption" rows="4" placeholder="What would you like to share?"></textarea>
-            <label class="check"><input id="confirm-publish" type="checkbox" required><span>Maine account aur content check kiya hai. Is post ko ab publish karna hai.</span></label>
-            <button id="publish-button" class="primary" type="submit">Publish post <span aria-hidden="true">↗</span></button>
+            <label class="check"><input id="confirm-publish" type="checkbox" required><span id="confirm-label">Maine account aur sab reels check ki hain. Is caption ke saath batch schedule karo.</span></label>
+            <button id="publish-button" class="primary" type="submit">Upload aur schedule batch <span aria-hidden="true">↗</span></button>
             <p id="publish-progress" class="hint" role="status"></p>
           </form>
         </section>
