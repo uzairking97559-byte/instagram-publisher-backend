@@ -26,6 +26,14 @@ const messages = {
   connection_rate_limit: "Connection attempts ki limit aa gayi. Baad mein try karo.",
   provider_not_configured: "Yeh login option abhi configure nahi hua hai.",
   invalid_post: "Account, HTTPS media link aur caption (maximum 2200 characters) check karo.",
+  invalid_upload: "Video file ko dobara chuno aur upload try karo.",
+  invalid_video_format: "MP4 ya MOV video select karo.",
+  upload_too_large: "Har video 50 MB se chhoti honi chahiye.",
+  request_too_large: "Har video 50 MB se chhoti honi chahiye.",
+  upload_storage_full: "Pending uploads ki storage limit bhar gayi. History mein purane reels complete hone do.",
+  invalid_batch: "1–10 videos, account, caption aur 10/15/30 minute ka gap select karo.",
+  asset_unavailable: "Koi selected video upload nahi hui ya pehle se queue mein hai. Videos dobara select karke upload karo.",
+  batch_cannot_resume: "Is batch ko continue nahi kar sakte. Pehle uncertain Reel ka status check karo.",
   idempotency_conflict: "Is request ki details badal gayi hain. History check karke page refresh karo.",
   connection_removed: "Is job ka account connection remove ho gaya hai.",
   connection_changed: "Account connection change hua. Refresh karke dobara check karo.",
@@ -36,6 +44,7 @@ const messages = {
 let accounts = [];
 let jobs = [];
 let busy = false;
+let pendingPollTimer = null;
 const timers = new Map();
 const attempts = new Map();
 
@@ -102,24 +111,71 @@ function renderAccounts() {
 function renderJobs() {
   $("jobs").replaceChildren();
   if (!jobs.length) $("jobs").append(element("p", "Your next idea starts here. Publish requests yahan dikhengi.", "empty"));
-  const names = { creating: "CREATING", processing: "PROCESSING", publishing: "CONFIRMING", published: "PUBLISHED", failed: "FAILED", unknown: "CHECK NEEDED" };
+  const names = { queued: "QUEUED", creating: "CREATING", processing: "PROCESSING", publishing: "CONFIRMING", published: "PUBLISHED", failed: "FAILED", unknown: "CHECK NEEDED" };
+  const batches = new Map();
+  const singles = [];
   for (const job of jobs) {
+    if (!job.batch_id) singles.push(job);
+    else { if (!batches.has(job.batch_id)) batches.set(job.batch_id, []); batches.get(job.batch_id).push(job); }
+  }
+  function addAction(card, job) {
+    if (!["processing", "unknown", "publishing"].includes(job.status)) return;
+    const action = element("button", job.status === "processing" ? "Check & finish publishing" : "Check existing request", "job-action");
+    action.type = "button";
+    action.addEventListener("click", async () => {
+      action.disabled = true;
+      try { await advance(job.id, false); await refresh(); }
+      catch (error) { explain(error); action.disabled = false; }
+    });
+    card.append(action);
+  }
+  for (const group of batches.values()) {
+    group.sort((a, b) => a.batch_position - b.batch_position);
+    const card = element("article", undefined, "job-card batch-card");
+    const first = group[0];
+    const status = first.batch_status === "completed"
+      ? (group.some((job) => job.status === "failed") ? "failed" : "published")
+      : group.find((job) => job.status === "unknown")?.status || group.find((job) => job.status === "failed")?.status
+        || group.find((job) => job.status === "processing" || job.status === "publishing" || job.status === "creating")?.status || "queued";
+    const head = element("div", undefined, "job-head");
+    head.append(element("strong", `@${first.account} · ${first.batch_count} reels · ${first.interval_minutes} min gap`),
+      element("span", names[status] || status, `badge ${status}`));
+    card.append(head);
+    for (const job of group) {
+      const row = element("div", undefined, "batch-job-row");
+      const label = job.media_name || `Reel ${job.batch_position}`;
+      row.append(element("span", `Reel ${job.batch_position}/${job.batch_count} · ${label}`),
+        element("span", names[job.status] || job.status, `badge ${job.status}`));
+      card.append(row);
+      if (job.status === "queued") card.append(element("p", `Publish target: ${new Date(job.scheduled_at).toLocaleString()}`));
+      if (job.error_code) card.append(element("p", messages[job.error_code] || "History check karke request ka status dobara dekho."));
+      if (job.published_media_id) card.append(element("p", `Published media: ${job.published_media_id}`));
+      addAction(card, job);
+    }
+    if (first.batch_status === "paused") {
+      card.append(element("p", "Batch ruk gaya hai. Failed Reel check kar lo; baaki queue abhi publish nahi hogi."));
+      const failed = group.find((job) => job.status === "failed");
+      if (failed && !["publish_uncertain", "creation_uncertain"].includes(first.batch_pause_reason)) {
+        const resume = element("button", "Continue with next reel", "job-action");
+        resume.type = "button";
+        resume.addEventListener("click", async () => {
+          resume.disabled = true;
+          try { await api(`/api/batches/${first.batch_id}/resume`, { method: "POST", body: "{}" }); await refresh(); }
+          catch (error) { explain(error); resume.disabled = false; }
+        });
+        card.append(resume);
+      }
+    }
+    $("jobs").append(card);
+  }
+  for (const job of singles) {
     const card = element("article", undefined, "job-card");
     const head = element("div", undefined, "job-head");
     head.append(element("strong", `@${job.account}`), element("span", names[job.status] || job.status, `badge ${job.status}`));
     card.append(head, element("p", `${job.media_type === "image" ? "Photo" : "Reel"} · ${new Date(job.created_at).toLocaleString()}`));
     if (job.error_code) card.append(element("p", messages[job.error_code] || "History check karke request ka status dobara dekho."));
     if (job.published_media_id) card.append(element("p", `Published media: ${job.published_media_id}`));
-    if (!["published", "failed"].includes(job.status)) {
-      const action = element("button", job.status === "processing" ? "Check & finish publishing" : "Check existing request", "job-action");
-      action.type = "button";
-      action.addEventListener("click", async () => {
-        action.disabled = true;
-        try { await advance(job.id, false); }
-        catch (error) { explain(error); action.disabled = false; }
-      });
-      card.append(action);
-    }
+    addAction(card, job);
     $("jobs").append(card);
   }
 }
@@ -127,6 +183,9 @@ async function refresh() {
   const [accountData, jobData] = await Promise.all([api("/api/accounts"), api("/api/jobs")]);
   accounts = accountData.accounts; jobs = jobData.jobs;
   renderAccounts(); renderJobs();
+  const pending = jobs.some((job) => ["queued", "creating", "processing", "publishing"].includes(job.status));
+  if (pending && !pendingPollTimer) pendingPollTimer = setInterval(() => { void refresh().catch(explain); }, 30000);
+  if (!pending && pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
 }
 async function advance(id, automatic) {
   const data = await api(`/api/jobs/${id}/publish`, { method: "POST", body: "{}" });
@@ -146,8 +205,8 @@ async function advance(id, automatic) {
   }
   return data.job;
 }
-async function requestKey(payload) {
-  const fingerprint = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(payload))))]
+async function requestKey(payload, salt = "") {
+  const fingerprint = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(salt ? [payload, salt] : payload))))]
     .map((byte) => byte.toString(16).padStart(2, "0")).join("");
   // Preserve retry identity after a lost response or page reload; no password,
   // token, caption or media URL is stored in browser storage.
@@ -163,6 +222,61 @@ async function requestKey(payload) {
   } catch { throw { code: "browser_storage_required" }; }
 }
 messages.browser_storage_required = "Safe retry ke liye browser storage available honi chahiye. Normal Chrome tab mein website kholo.";
+
+let fallbackBatchAttempt = null;
+function batchAttemptId() {
+  try {
+    let value = sessionStorage.getItem("publisher-batch-attempt");
+    if (!value) { value = crypto.randomUUID(); sessionStorage.setItem("publisher-batch-attempt", value); }
+    return value;
+  } catch {
+    fallbackBatchAttempt ||= crypto.randomUUID();
+    return fallbackBatchAttempt;
+  }
+}
+function clearBatchAttempt() {
+  fallbackBatchAttempt = null;
+  try { sessionStorage.removeItem("publisher-batch-attempt"); } catch {}
+}
+function formatBytes(value) {
+  return value < 1024 * 1024 ? `${Math.ceil(value / 1024)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+function selectedFiles() { return [...($("reel-files").files || [])]; }
+function updateFileSummary() {
+  const files = selectedFiles();
+  if (!files.length) { $("file-summary").textContent = "1–10 MP4/MOV files. Har file 50 MB tak; pending uploads ke liye total storage limit 500 MB hai."; return; }
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  $("file-summary").textContent = `${files.length} videos · total ${formatBytes(total)} · ${files.map((file) => file.name).join(", ")}`;
+}
+function updatePublishMode() {
+  const batch = $("upload-mode").value === "batch";
+  $("batch-options").hidden = !batch;
+  $("single-options").hidden = batch;
+  $("reel-files").required = batch;
+  $("media-url").required = !batch;
+  $("caption").required = batch;
+  $("confirm-label").textContent = batch
+    ? "Maine account aur sab reels check ki hain. Ek caption ke saath batch schedule karo."
+    : "Maine account aur content check kiya hai. Is post ko ab publish karna hai.";
+  $("publish-button").firstChild.textContent = batch ? "Upload aur schedule batch " : "Publish post ";
+}
+async function uploadAsset(file, attempt) {
+  const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
+  let response;
+  try {
+    response = await fetch("/api/assets", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "Idempotency-Key": key },
+      body: file, signal: AbortSignal.timeout(180000) });
+  } catch { throw { code: "temporarily_unavailable" }; }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401 && data.error === "sign_in_required") {
+      $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
+    }
+    throw { code: data.error || "temporarily_unavailable" };
+  }
+  return data.asset;
+}
 
 async function boot() {
   try {
@@ -190,6 +304,7 @@ $("logout").addEventListener("click", async () => {
   try {
     await api("/auth/logout", { method: "POST", body: "{}" });
     for (const timer of timers.values()) clearTimeout(timer); timers.clear();
+    if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
     accounts = []; jobs = []; renderAccounts(); renderJobs();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
@@ -201,23 +316,56 @@ $("caption").addEventListener("input", () => {
   $("caption-count").textContent = `${length} / 2200`;
   $("caption").setCustomValidity(length > 2200 ? "Caption 2200 characters se chhota rakho." : "");
 });
+$("upload-mode").addEventListener("change", updatePublishMode);
+$("reel-files").addEventListener("change", updateFileSummary);
+updatePublishMode();
 $("publish-form").addEventListener("submit", async (event) => {
   event.preventDefault(); if (busy) return;
   busy = true; $("publish-button").disabled = true;
+  let batchScheduled = false;
   $("publish-progress").textContent = "Request save ho rahi hai. Response na aaye to pehle History check karo.";
-  const type = $("media-type").value;
-  const payload = { connection_id: $("account").value, caption: $("caption").value,
-    [type === "image" ? "image_url" : "video_url"]: $("media-url").value.trim() };
   try {
-    const key = await requestKey([type, payload]);
-    const { job } = await api(`/api/publish/${type === "image" ? "image" : "reels"}`, {
-      method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload)
-    });
-    await refresh();
-    if (job.status === "processing") await advance(job.id, true);
-    $("publish-progress").textContent = "Request History mein save hai. Media processing ke liye is page ko khula rakho, ya baad mein Check & finish dabao.";
+    if ($("upload-mode").value === "batch") {
+      const files = selectedFiles();
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+      if (files.length < 1 || files.length > 10 || files.some((file) => file.size > 50 * 1024 * 1024) || totalBytes > 500 * 1024 * 1024) {
+        throw { code: files.some((file) => file.size > 50 * 1024 * 1024) ? "upload_too_large" : "invalid_batch" };
+      }
+      const attempt = batchAttemptId();
+      const assetIds = [];
+      for (let index = 0; index < files.length; index++) {
+        $("publish-progress").textContent = `Video ${index + 1}/${files.length} upload ho rahi hai… upload ke dauran page band mat karo.`;
+        const asset = await uploadAsset(files[index], attempt);
+        assetIds.push(asset.asset_id);
+      }
+      const payload = { connection_id: $("account").value, caption: $("caption").value,
+        interval_minutes: Number($("interval-minutes").value), asset_ids: assetIds };
+      const key = await requestKey(["batch", payload], attempt);
+      await api("/api/batches", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload) });
+      batchScheduled = true;
+      clearBatchAttempt();
+      $("publish-progress").textContent = "Batch queue mein save hai. Pehli reel start hogi; baaki chune hue gap par. Page khula rakho—Free service soyi to delay ho sakta hai.";
+      $("publish-form").reset(); updateFileSummary(); updatePublishMode();
+      await refresh();
+    } else {
+      const type = $("media-type").value;
+      const payload = { connection_id: $("account").value, caption: $("caption").value,
+        [type === "image" ? "image_url" : "video_url"]: $("media-url").value.trim() };
+      const key = await requestKey([type, payload]);
+      const { job } = await api(`/api/publish/${type === "image" ? "image" : "reels"}`, {
+        method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload)
+      });
+      await refresh();
+      if (job.status === "processing") await advance(job.id, true);
+      $("publish-progress").textContent = "Request History mein save hai. Processing ke liye page khula rakho, ya baad mein Check & finish dabao.";
+    }
     $("confirm-publish").checked = false;
-  } catch (error) { explain(error); $("publish-progress").textContent = "Pehle History check karo. Same details dobara submit karne par purana request hi use hoga."; }
+  } catch (error) {
+    explain(error);
+    $("publish-progress").textContent = batchScheduled
+      ? "Batch save ho gayi hai. History refresh nahi hui—button dobara dabane se pehle Refresh check karo."
+      : "Batch schedule nahi hui. Pehle History check karo; agar upload beech mein ruki, to dobara submit karne par upload safely retry hoga.";
+  }
   finally { busy = false; renderAccounts(); }
 });
 const status = new URLSearchParams(location.search).get("notice");
