@@ -54,6 +54,14 @@ async function harness(t, options = {}) {
     let data; try { data = JSON.parse(text); } catch {}
     return { response, data, text, status: response.status, location: response.headers.get("location"), cookie: response.headers.get("set-cookie")?.split(";")[0] };
   };
+  const requestRaw = async (path, { method = "POST", body, cookie, originHeader = origin, headers = {} } = {}) => {
+    const response = await fetch(origin + path, { method, redirect: "manual", headers: {
+      ...(originHeader ? { origin: originHeader } : {}), ...(cookie ? { cookie } : {}), ...headers
+    }, ...(body !== undefined ? { body } : {}) });
+    const text = await response.text();
+    let data; try { data = JSON.parse(text); } catch {}
+    return { response, data, text, status: response.status, location: response.headers.get("location") };
+  };
   const login = async (cookie) => (await request("/auth/login", { method: "POST", body: { password: TEST_PASSWORD }, cookie })).cookie;
   async function account(provider = "facebook", id = "10001", overrides = {}) {
     const record = { username: "test_creator", token: "test-only-page-token", expires: null, ...overrides };
@@ -62,7 +70,7 @@ async function harness(t, options = {}) {
       [provider, id, record.username, encryptToken(record.token, key, `${provider}:${id}`), record.expires]);
     return result.rows[0].id;
   }
-  return { app, db, pg, env, key, origin, request, login, calls, logs, handler, account, server };
+  return { app, db, pg, env, key, origin, request, requestRaw, login, calls, logs, handler, account, server };
 }
 
 function facebookMeta(total = 2) {
