@@ -10,7 +10,7 @@ async function start() {
   const app = await createApp({ db, logger: log });
   const server = app.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () => log({ event: "server_started" }));
   server.headersTimeout = 15000;
-  server.requestTimeout = 30000;
+  server.requestTimeout = 180000;
   const retry = setInterval(() => { void app.locals.initialize(); }, 60000);
   retry.unref();
   let stopping = false;
