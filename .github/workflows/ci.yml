@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - secure-oauth-review
   pull_request:
     branches:
       - main
