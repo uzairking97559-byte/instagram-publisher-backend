@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS publisher_accounts (
   UNIQUE(provider, account_id)
 );
 
+-- Per-account post target and carry-over count. The carry-over is entered by
+-- the owner for posts scheduled/published before this workspace tracked them.
+CREATE TABLE IF NOT EXISTS publisher_account_progress (
+  account_row_id BIGINT PRIMARY KEY REFERENCES publisher_accounts(id) ON DELETE CASCADE,
+  target_count INTEGER NOT NULL DEFAULT 200 CHECK (target_count BETWEEN 1 AND 10000),
+  baseline_count INTEGER NOT NULL DEFAULT 0 CHECK (baseline_count >= 0 AND baseline_count <= target_count),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Reel files are uploaded privately, then exposed to Meta through a short-lived
 -- unguessable URL. They are deleted after expiry; never store the URL in jobs.
 CREATE TABLE IF NOT EXISTS publisher_media_assets (
@@ -52,7 +62,7 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
   account_name TEXT NOT NULL,
   caption TEXT NOT NULL,
   interval_minutes INTEGER NOT NULL CHECK (interval_minutes IN (10, 15, 30)),
-  item_count INTEGER NOT NULL CHECK (item_count BETWEEN 1 AND 10),
+  item_count INTEGER NOT NULL CHECK (item_count BETWEEN 1 AND 20),
   next_position INTEGER NOT NULL DEFAULT 1,
   next_publish_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   active_job_id UUID,
@@ -62,6 +72,11 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Existing deployments may have the earlier ten-item constraint.
+ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_item_count_check;
+ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_item_count_check
+  CHECK (item_count BETWEEN 1 AND 20);
 
 ALTER TABLE publisher_media_assets ADD COLUMN IF NOT EXISTS assigned_batch_id UUID REFERENCES publisher_batches(id) ON DELETE SET NULL;
 

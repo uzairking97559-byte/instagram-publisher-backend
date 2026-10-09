@@ -31,7 +31,8 @@ const messages = {
   upload_too_large: "Har video 50 MB se chhoti honi chahiye.",
   request_too_large: "Har video 50 MB se chhoti honi chahiye.",
   upload_storage_full: "Pending uploads ki storage limit bhar gayi. History mein purane reels complete hone do.",
-  invalid_batch: "1–10 videos, account, caption aur 10/15/30 minute ka gap select karo.",
+  invalid_batch: "1–20 videos, account, caption aur 10/15/30 minute ka gap select karo.",
+  invalid_progress_settings: "Target 1–10,000 aur pehle se ki ginti 0 se target ke beech rakho.",
   asset_unavailable: "Koi selected video upload nahi hui ya pehle se queue mein hai. Videos dobara select karke upload karo.",
   batch_cannot_resume: "Is batch ko continue nahi kar sakte. Pehle uncertain Reel ka status check karo.",
   idempotency_conflict: "Is request ki details badal gayi hain. History check karke page refresh karo.",
@@ -43,6 +44,7 @@ const messages = {
 };
 let accounts = [];
 let jobs = [];
+let progress = [];
 let busy = false;
 let pendingPollTimer = null;
 const timers = new Map();
@@ -59,6 +61,58 @@ function element(tag, text, className) {
   if (text !== undefined) node.textContent = text;
   if (className) node.className = className;
   return node;
+}
+function addAccountProgress(card, account) {
+  const item = progress.find((row) => row.connection_id === account.connection_id);
+  if (!item) return;
+  const target = item.target_count;
+  const baseline = item.baseline_count;
+  const counted = item.tracked_count;
+  const remaining = item.remaining_count;
+  const block = element("section", undefined, "account-progress");
+  const title = element("div", undefined, "progress-heading");
+  title.append(element("strong", `${counted} / ${target} posts`), element("span", `${remaining} baaki`));
+  block.append(title);
+  const bar = element("progress", undefined, "progress-bar");
+  bar.max = target; bar.value = Math.min(target, counted);
+  bar.setAttribute("aria-label", `@${account.username || account.account_id}: ${counted} of ${target} posts tracked`);
+  block.append(bar);
+  block.append(element("p", `Pehle se ${baseline} · Is site se ${item.published_count} posted, ${item.scheduled_count} scheduled · ${item.failed_count} failed · ${item.unknown_count} check needed`, "progress-details"));
+
+  const details = document.createElement("details");
+  details.className = "progress-settings";
+  details.append(element("summary", "Target aur pehle se hui ginti set karo"));
+  const form = element("form", undefined, "progress-form");
+  const fields = element("div", undefined, "progress-fields");
+  const targetLabel = element("label", "Total target");
+  const targetInput = document.createElement("input");
+  targetInput.type = "number"; targetInput.min = "1"; targetInput.max = "10000";
+  targetInput.step = "1"; targetInput.required = true; targetInput.value = String(target);
+  targetLabel.append(targetInput);
+  const baselineLabel = element("label", "Site se pehle schedule/post");
+  const baselineInput = document.createElement("input");
+  baselineInput.type = "number"; baselineInput.min = "0"; baselineInput.max = String(target);
+  baselineInput.step = "1"; baselineInput.required = true; baselineInput.value = String(baseline);
+  targetInput.addEventListener("input", () => { baselineInput.max = targetInput.value || "10000"; });
+  baselineLabel.append(baselineInput);
+  fields.append(targetLabel, baselineLabel);
+  const save = element("button", "Save progress target", "quiet");
+  save.type = "submit";
+  form.append(fields, save);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); save.disabled = true;
+    try {
+      await api(`/api/accounts/${encodeURIComponent(account.connection_id)}/progress`, {
+        method: "PUT", body: JSON.stringify({ target_count: Number(targetInput.value), baseline_count: Number(baselineInput.value) })
+      });
+      notice("Account ka progress target save ho gaya.");
+      await refresh();
+    } catch (error) { explain(error); }
+    finally { save.disabled = false; }
+  });
+  details.append(form);
+  block.append(details);
+  card.append(block);
 }
 async function api(path, options = {}) {
   let response;
@@ -91,6 +145,7 @@ function renderAccounts() {
     head.append(element("span", name.slice(0, 1), "avatar"), element("h3", `@${name}`));
     card.append(head, element("p", `${account.provider === "facebook" ? "Facebook Login" : "Instagram Login"} · ${account.needs_reconnect ? "Reconnect needed" : "Connected"}`));
     if (account.token_expires_at) card.append(element("p", `Authorization until ${new Date(account.token_expires_at).toLocaleDateString()}`));
+    addAccountProgress(card, account);
     const remove = element("button", "Disconnect", "quiet");
     remove.type = "button";
     remove.addEventListener("click", async () => {
@@ -180,8 +235,8 @@ function renderJobs() {
   }
 }
 async function refresh() {
-  const [accountData, jobData] = await Promise.all([api("/api/accounts"), api("/api/jobs")]);
-  accounts = accountData.accounts; jobs = jobData.jobs;
+  const [accountData, jobData, progressData] = await Promise.all([api("/api/accounts"), api("/api/jobs"), api("/api/progress")]);
+  accounts = accountData.accounts; jobs = jobData.jobs; progress = progressData.progress;
   renderAccounts(); renderJobs();
   const pending = jobs.some((job) => ["queued", "creating", "processing", "publishing"].includes(job.status));
   if (pending && !pendingPollTimer) pendingPollTimer = setInterval(() => { void refresh().catch(explain); }, 30000);
@@ -244,7 +299,7 @@ function formatBytes(value) {
 function selectedFiles() { return [...($("reel-files").files || [])]; }
 function updateFileSummary() {
   const files = selectedFiles();
-  if (!files.length) { $("file-summary").textContent = "1–10 MP4/MOV files. Har file 50 MB tak; pending uploads ke liye total storage limit 500 MB hai."; return; }
+  if (!files.length) { $("file-summary").textContent = "1–20 MP4/MOV files. Har file 50 MB tak; pending uploads ke liye total storage limit 500 MB hai."; return; }
   const total = files.reduce((sum, file) => sum + file.size, 0);
   $("file-summary").textContent = `${files.length} videos · total ${formatBytes(total)} · ${files.map((file) => file.name).join(", ")}`;
 }
@@ -305,7 +360,7 @@ $("logout").addEventListener("click", async () => {
     await api("/auth/logout", { method: "POST", body: "{}" });
     for (const timer of timers.values()) clearTimeout(timer); timers.clear();
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
-    accounts = []; jobs = []; renderAccounts(); renderJobs();
+    accounts = []; jobs = []; progress = []; renderAccounts(); renderJobs();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -328,7 +383,7 @@ $("publish-form").addEventListener("submit", async (event) => {
     if ($("upload-mode").value === "batch") {
       const files = selectedFiles();
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (files.length < 1 || files.length > 10 || files.some((file) => file.size > 50 * 1024 * 1024) || totalBytes > 500 * 1024 * 1024) {
+      if (files.length < 1 || files.length > 20 || files.some((file) => file.size > 50 * 1024 * 1024) || totalBytes > 500 * 1024 * 1024) {
         throw { code: files.some((file) => file.size > 50 * 1024 * 1024) ? "upload_too_large" : "invalid_batch" };
       }
       const attempt = batchAttemptId();
