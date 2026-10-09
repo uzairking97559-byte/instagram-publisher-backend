@@ -5,6 +5,26 @@ const crypto = require("node:crypto");
 const { harness, json } = require("./helpers");
 const { decryptToken } = require("../lib/security");
 
+function mp4(marker = "clip") {
+  return Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.from(marker)]);
+}
+
+async function uploadVideo(h, cookie, name, data = mp4(), key = crypto.randomUUID()) {
+  const result = await h.requestRaw("/api/assets", { cookie, body: data, headers: {
+    "content-type": "video/mp4", "x-file-name": name, "idempotency-key": key
+  } });
+  return { ...result, key };
+}
+
+async function waitFor(predicate, tries = 40) {
+  for (let i = 0; i < tries; i++) {
+    const value = await predicate();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the batch worker");
+}
+
 function createRequest(h, cookie, connection_id, type = "image", key = crypto.randomUUID()) {
   return {
     key,
@@ -167,4 +187,104 @@ test("unsafe media and missing idempotency key are rejected before any Meta call
   assert.equal((await request.send({ ...request.body, image_url: "https://127.0.0.1/secrets" })).status, 400);
   assert.equal((await h.request("/api/publish/image", { method: "POST", cookie, body: request.body })).status, 400);
   assert.equal(h.calls.length, 0);
+});
+
+test("uploaded Reel files are private to the owner except through their expiring signed Meta URL", async (t) => {
+  const h = await harness(t), cookie = await h.login();
+  const data = mp4("signed-media");
+  const key = crypto.randomUUID();
+  assert.equal((await uploadVideo(h, null, "clip.mp4", data, key)).status, 401);
+  const uploaded = await uploadVideo(h, cookie, "clip.mp4", data, key);
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.data.asset.file_name, "clip.mp4");
+  const replay = await uploadVideo(h, cookie, "clip.mp4", data, key);
+  assert.equal(replay.data.asset.asset_id, uploaded.data.asset.asset_id);
+  assert.equal((await uploadVideo(h, cookie, "other.mp4", mp4("different"), key)).status, 409);
+
+  const assetId = uploaded.data.asset.asset_id;
+  const token = crypto.createHmac("sha256", h.key).update(`publisher-media-v1:${assetId}`).digest("base64url");
+  const response = await fetch(`${h.origin}/media/${assetId}/${token}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "video/mp4");
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  const invalid = await fetch(`${h.origin}/media/${assetId}/${"x".repeat(43)}`);
+  assert.equal(invalid.status, 404);
+  await h.db.query("UPDATE publisher_media_assets SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [assetId]);
+  const expired = await fetch(`${h.origin}/media/${assetId}/${token}`);
+  assert.equal(expired.status, 404);
+});
+
+test("batch shares one caption and publishes Reels in order at the configured interval", async (t) => {
+  const mediaRequests = [], published = [];
+  const h = await harness(t, { meta: (url, init) => {
+    if (url.pathname.endsWith("/media")) {
+      const fields = new URLSearchParams(init.body);
+      mediaRequests.push({ caption: fields.get("caption"), video_url: fields.get("video_url") });
+      return json({ id: String(88000 + mediaRequests.length) });
+    }
+    if (url.pathname.endsWith("/media_publish")) {
+      published.push(new URLSearchParams(init.body).get("creation_id"));
+      return json({ id: String(99000 + published.length) });
+    }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login(), id = await h.account("instagram", "11001");
+  const first = await uploadVideo(h, cookie, "one.mp4", mp4("first"));
+  const second = await uploadVideo(h, cookie, "two.mp4", mp4("second"));
+  const payload = { connection_id: id, caption: "Same caption for every Reel", interval_minutes: 10,
+    asset_ids: [first.data.asset.asset_id, second.data.asset.asset_id] };
+  const batchKey = crypto.randomUUID();
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": batchKey }, body: payload });
+  assert.equal(created.status, 202);
+  assert.equal(created.data.batch.jobs.length, 2);
+  assert.ok(["queued", "processing"].includes(created.data.batch.jobs[0].status));
+  assert.equal((await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": batchKey }, body: payload })).data.batch.id,
+    created.data.batch.id);
+  assert.equal((await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": batchKey }, body: { ...payload, caption: "Changed" } })).status, 409);
+
+  await waitFor(async () => mediaRequests.length === 1);
+  await waitFor(async () => (await h.db.query("SELECT status FROM publisher_jobs WHERE batch_id=$1 AND batch_position=1", [created.data.batch.id])).rows[0].status === "processing");
+  assert.equal(mediaRequests.length, 1, "only the first Reel starts immediately");
+  assert.equal(mediaRequests[0].caption, "Same caption for every Reel");
+  const url = new URL(mediaRequests[0].video_url);
+  assert.equal(url.pathname.startsWith("/media/"), true);
+  assert.deepEqual(Buffer.from(await (await fetch(url)).arrayBuffer()), mp4("first"));
+
+  await h.db.query("UPDATE publisher_jobs SET next_check_at=NOW()-INTERVAL '1 second' WHERE batch_id=$1 AND batch_position=1", [created.data.batch.id]);
+  await h.app.locals.runPublishingScheduler();
+  assert.deepEqual(published, ["88001"]);
+  const batchAfterFirst = await h.db.query("SELECT status,next_position FROM publisher_batches WHERE id=$1", [created.data.batch.id]);
+  assert.equal(batchAfterFirst.rows[0].status, "queued");
+  assert.equal(Number(batchAfterFirst.rows[0].next_position), 2);
+  assert.equal(mediaRequests.length, 1, "the second Reel waits for the chosen gap");
+
+  await h.db.query("UPDATE publisher_batches SET next_publish_at=NOW()-INTERVAL '1 second' WHERE id=$1", [created.data.batch.id]);
+  await h.app.locals.runPublishingScheduler();
+  await waitFor(async () => mediaRequests.length === 2);
+  assert.equal(mediaRequests[1].caption, mediaRequests[0].caption);
+  assert.notEqual(mediaRequests[1].video_url, mediaRequests[0].video_url);
+  await h.db.query("UPDATE publisher_jobs SET next_check_at=NOW()-INTERVAL '1 second' WHERE batch_id=$1 AND batch_position=2", [created.data.batch.id]);
+  await h.app.locals.runPublishingScheduler();
+  const final = await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [created.data.batch.id]);
+  assert.equal(final.rows[0].status, "completed");
+  assert.deepEqual(published, ["88001", "88002"]);
+});
+
+test("a definitively failed Reel pauses its batch until the owner continues", async (t) => {
+  const h = await harness(t, { meta: (url) => url.pathname.endsWith("/media")
+    ? json({ error: { code: 10, message: "test rejection" } }, 400)
+    : json({ status_code: "FINISHED" }) });
+  const cookie = await h.login(), id = await h.account("instagram", "11002");
+  const first = await uploadVideo(h, cookie, "bad.mp4", mp4("bad"));
+  const second = await uploadVideo(h, cookie, "next.mp4", mp4("next"));
+  const payload = { connection_id: id, caption: "caption", interval_minutes: 15,
+    asset_ids: [first.data.asset.asset_id, second.data.asset.asset_id] };
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() }, body: payload });
+  await waitFor(async () => (await h.db.query("SELECT status FROM publisher_jobs WHERE batch_id=$1 AND batch_position=1", [created.data.batch.id])).rows[0].status === "failed");
+  const paused = await h.db.query("SELECT status,next_position,pause_reason FROM publisher_batches WHERE id=$1", [created.data.batch.id]);
+  assert.equal(paused.rows[0].status, "paused");
+  assert.equal(Number(paused.rows[0].next_position), 2);
+  assert.equal(paused.rows[0].pause_reason, "permission_required");
+  assert.equal((await h.request(`/api/batches/${created.data.batch.id}/resume`, { method: "POST", cookie, body: {} })).status, 200);
+  await waitFor(async () => (await h.db.query("SELECT status FROM publisher_jobs WHERE batch_id=$1 AND batch_position=2", [created.data.batch.id])).rows[0].status === "failed");
 });
