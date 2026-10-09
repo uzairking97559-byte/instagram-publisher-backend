@@ -125,16 +125,27 @@ function addAccountProgress(card, account) {
   card.append(block);
 }
 async function api(path, options = {}) {
-  const readOnly = ["GET", "HEAD"].includes((options.method || "GET").toUpperCase());
-  const retryDelays = [500, 1000, 2000, 4000];
+  const method = (options.method || "GET").toUpperCase();
+  const readOnly = ["GET", "HEAD"].includes(method);
+  const idempotencyKey = options.headers?.["Idempotency-Key"] || options.headers?.["idempotency-key"] || "";
+  // Only batch creation is replayed as a write; its stable key makes the request idempotent.
+  const idempotentBatch = method === "POST" && path === "/api/batches" && /^[0-9a-f-]{36}$/i.test(idempotencyKey);
+  const retryable = readOnly || idempotentBatch;
+  const retryDelays = [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000];
+  const waitToRetry = async (delay) => {
+    if (idempotentBatch) {
+      $("publish-progress").textContent = `Service temporary unavailable hai. Batch same request ID se safely retry hogi; agla retry ${Math.ceil(delay / 1000)} sec mein.`;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  };
   for (let attempt = 0; ; attempt++) {
     let response;
     try {
       response = await fetch(path, { credentials: "same-origin", ...options,
         headers: { "Content-Type": "application/json", ...options.headers }, signal: AbortSignal.timeout(35000) });
     } catch (error) {
-      if (readOnly && error?.name !== "TimeoutError" && attempt < retryDelays.length) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      if ((readOnly || idempotentBatch) && error?.name !== "TimeoutError" && attempt < retryDelays.length) {
+        await waitToRetry(retryDelays[attempt]);
         continue;
       }
       throw { code: "temporarily_unavailable" };
@@ -147,8 +158,8 @@ async function api(path, options = {}) {
         $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
       }
       const code = data.error || "temporarily_unavailable";
-      if (readOnly && response.status >= 500 && code === "temporarily_unavailable" && attempt < retryDelays.length) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      if (retryable && response.status >= 500 && code === "temporarily_unavailable" && attempt < retryDelays.length) {
+        await waitToRetry(retryDelays[attempt]);
         continue;
       }
       throw { code };
@@ -343,7 +354,11 @@ function updatePublishMode() {
 }
 async function uploadAsset(file, attempt) {
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
-  const retryDelays = [500, 1000, 2000, 4000];
+  const retryDelays = [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000];
+  const waitToRetry = async (delay) => {
+    $("publish-progress").textContent = `${file.name} ka upload temporary unavailable hai; same upload safely retry hogi (${Math.ceil(delay / 1000)} sec mein).`;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  };
   for (let retry = 0; ; retry++) {
     let response;
     try {
@@ -352,7 +367,7 @@ async function uploadAsset(file, attempt) {
         body: file, signal: AbortSignal.timeout(180000) });
     } catch (error) {
       if (error?.name !== "TimeoutError" && retry < retryDelays.length) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelays[retry]));
+        await waitToRetry(retryDelays[retry]);
         continue;
       }
       throw { code: "temporarily_unavailable" };
@@ -365,7 +380,7 @@ async function uploadAsset(file, attempt) {
       const code = data.error || "temporarily_unavailable";
       // Asset uploads use a stable idempotency key; retrying this step cannot publish a duplicate Reel.
       if (response.status >= 500 && code === "temporarily_unavailable" && retry < retryDelays.length) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelays[retry]));
+        await waitToRetry(retryDelays[retry]);
         continue;
       }
       throw { code };
@@ -419,7 +434,7 @@ $("publish-form").addEventListener("submit", async (event) => {
   event.preventDefault(); if (busy) return;
   busy = true; $("publish-button").disabled = true;
   let batchScheduled = false;
-  $("publish-progress").textContent = "Request save ho rahi hai. Response na aaye to pehle History check karo.";
+  $("publish-progress").textContent = "Upload aur batch save complete hone tak page khula rakho. Uske baad phone band kar sakte ho.";
   try {
     if ($("upload-mode").value === "batch") {
       const files = selectedFiles();
@@ -437,10 +452,11 @@ $("publish-form").addEventListener("submit", async (event) => {
       const payload = { connection_id: $("account").value, caption: $("caption").value,
         interval_minutes: Number($("interval-minutes").value), asset_ids: assetIds };
       const key = await requestKey(["batch", payload], attempt);
+      $("publish-progress").textContent = "Batch queue mein save ho rahi hai… temporary service error aaya to safe retry hoga.";
       await api("/api/batches", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload) });
       batchScheduled = true;
       clearBatchAttempt();
-      $("publish-progress").textContent = "Batch queue mein save hai. Pehli reel start hogi; baaki chune hue gap par. Page khula rakho—Free service soyi to delay ho sakta hai.";
+      $("publish-progress").textContent = "Batch queue mein save hai. Pehli Reel process hogi; baaki chune hue gap par. Ab phone band kar sakte ho—service schedule ko background mein process karegi.";
       $("publish-form").reset(); updateFileSummary(); updatePublishMode();
       await refresh();
     } else {
