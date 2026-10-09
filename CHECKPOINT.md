@@ -11,29 +11,29 @@ Continue the existing repository and PR #1 (`secure-oauth-review`). The review b
 - Browser-bound OAuth attempts with an atomic claim, expiration, safe duplicate/cancel/error handling and clean callback redirects. Separate Facebook and Instagram product credentials. Facebook account discovery paginates trusted Graph endpoints.
 - Persistent idempotency for photos and reels; processing checks and atomic publish claims. Ambiguous outcomes are retained for read-only recovery without blindly repeating a publish request. Reconnect/expiry handling and eligible Instagram token refresh before use.
 - Mobile dashboard with account management, explicit publish confirmation, durable request history and safe text rendering. No local file uploader, scheduled publishing service or proactive unattended token-refresh worker is included.
-- Database readiness, verified TLS by default, outbound request deadlines, sanitized errors/logging, reproducible dependency lockfile and setup/migration documentation.
+- Database readiness, explicit PostgreSQL TLS modes (`verify-full`, encrypted `require` for Render's self-signed internal certificates, and local-only `disable`), outbound request deadlines, sanitized errors/logging, reproducible dependency lockfile and setup/migration documentation.
 
 ## Verification completed
 
-- `npm test`: **22 tests passed**, 0 failed. Express HTTP integration tests use PGlite, a local PostgreSQL engine; external Meta responses are mocked.
-- Covered concurrent OAuth replay, 30-account paginated discovery, logout persistence, wrong-browser/expired/cancelled states, separate Instagram credentials, ciphertext tampering and account binding, large-ID precision, origin rejection, rate limiting, concurrent publishing, uncertain results, token refresh/revocation and a lost database write after Meta publishing.
-- Headless Chromium: 390px mobile and 1365px desktop screenshots visually inspected. Owner sign-in, account list, mocked publish receipt and sign-out passed. No JavaScript page errors or mobile horizontal overflow. This was not a test on the owner's physical Android device or with real Meta authorization.
-- `npm audit --omit=dev`: 0 reported production dependency vulnerabilities at the time of checking. This is not a security certification.
+- `npm test`: **23 tests passed**, 0 failed on Node 24.19.0. Express HTTP tests use PGlite; Meta responses are mocked. The added test covers PostgreSQL TLS mode selection and confirms URL SSL flags cannot override `PGSSL`.
+- Covered concurrent OAuth replay, paginated discovery of 30 test accounts, logout persistence, wrong-browser/expired/cancelled states, ciphertext tampering and account binding, origin rejection, rate limiting, concurrent publishing, ambiguous outcomes and reconnect/refresh handling.
+- Headless Chromium checks recorded in the reviewed implementation passed at 390px mobile and 1365px desktop. No physical Android device or live Meta authorization was tested.
+- `npm audit --omit=dev` previously reported 0 known production dependency vulnerabilities at the time checked. This is not a security certification.
 - JavaScript syntax checks and `git diff --check` passed.
-- GitHub Actions passed on reviewed implementation head `1f155a06b57c8567fdb3e3bbb7466e46b2046c43` under Node 22.x and 24.x. Meta responses were mocked; no live Instagram account or post was tested. A checkpoint-only follow-up commit may trigger a fresh CI run.
+- GitHub Actions run #4 passed on parent review head `394a6955a291f1e7b778d9b71bdf5e27f2d2d8fa` under Node 22.x and 24.x. This TLS repair is a new commit and its CI run must be checked separately. No real Meta request or post was made.
 
 ## Observed external state
 
-- PR #1 was open, unmerged and mergeable at inspection. The reviewed code/CI head was `1f155a06b57c8567fdb3e3bbb7466e46b2046c43`; inspect the live PR head before later edits and use an expected-head lease.
-- Render workspace `tea-db3p0jrncjis73b9j2lg`, service `srv-db3p42rtqb8s73esptv0`, is `instagram-publisher-backend` on Free in Ohio, with auto-deploy from `main`. The only live deploy found was `dep-db3ptvqjnfac738cbn40`, commit `14dd0326ad2b7118c6e5a6915314f63e9f3382ed`. The review changes are not deployed; merging would trigger a production deploy.
-- Render's Postgres listing returned no instances. No database was created.
-- The existing public `/health` endpoint returned HTTP 200 in the prior verified check; this verifies only the old deployment's liveness, not the review OAuth flow.
-- Chrome's reported Dangerous site warning remains unresolved. The available public Transparency Report check did not provide a site verdict. No bypass was attempted.
+- Immediately before this update, PR #1 was open, unmerged and mergeable on `secure-oauth-review` at parent head `394a6955a291f1e7b778d9b71bdf5e27f2d2d8fa`. This update changes only the review branch; check the latest CI before considering merge.
+- Render service `srv-db3p42rtqb8s73esptv0` remains on the Free plan in Ohio and auto-deploys from `main`. Its currently live deploy is still `dep-db3ptvqjnfac738cbn40`, commit `14dd0326ad2b7118c6e5a6915314f63e9f3382ed`; the review code is not deployed.
+- The owner-created Render database `instagram-publisher-db` (`dpg-db4e2ltg1s2s7394qkag-a`) is available in Ohio on plan `0.1c-256mb`, with 1 GB storage. The creation screen showed an estimated total of **$6.30/month** ($6 compute + $0.30 storage), billed by the second. The verified IP allow list is empty, blocking external access.
+- The web service and database share the same Render workspace and Ohio region. Render documents that same-region services use the private internal URL regardless of the external IP allow list; this backend should use that internal URL with `PGSSL=require`. No database credentials or URLs belong in this file.
+- A previous check observed HTTP 200 on the old `/health` endpoint; this confirms only old-deployment liveness. Google Transparency Report did not expose a site verdict through the available read, so Chrome's Dangerous site warning remains unresolved. No bypass was attempted.
 
 ## Remaining gates
 
-1. A PostgreSQL database is still needed for persistent token/account storage on Render. A payment method being present in Render does not mean a database exists or approve its recurring price. Before provisioning, choose and explicitly approve the exact database plan and total cost.
-2. Configure `DATABASE_URL`, a stable `TOKEN_ENCRYPTION_KEY`, a private `DASHBOARD_PASSWORD`, the canonical `REDIRECT_URI`, and Facebook/Instagram product credentials privately in Render. Never print existing environment values.
-3. Resolve the Safe Browsing warning, verify Meta app access/permissions, privacy and data deletion setup, then review PR #1 and approve a production rollout separately. After safe deployment, perform fresh official authorization using an owner/test account. Any real publishing smoke test needs separate approval of the exact account and content.
+1. Set `DATABASE_URL` to the Render internal connection URL and `PGSSL=require`, plus a stable `TOKEN_ENCRYPTION_KEY`, private `DASHBOARD_PASSWORD`, canonical `REDIRECT_URI`, and the right Facebook/Instagram product credentials, only in Render's private settings. Never ask for or print those secrets in chat. The service is still running old code, so do not wire the new database into that old deployment.
+2. Resolve the Safe Browsing warning and verify Meta app access/permissions, privacy and data deletion setup. The owner must complete official Facebook/Instagram authorization in their own browser after a safe review deployment.
+3. Review PR #1 and give specific approval for merge/production rollout separately. A real Instagram publishing smoke test also requires approval of the exact account, media and caption.
 
 Keep the remaining limitations explicit: single owner rather than public multi-tenant access; URL-based media input; manual resumption after closing the dashboard; no guarantee of permanent tokens, no verification/suspension prevention, and no exactly-once guarantee across independently created requests/devices. Do not invent a completion percentage or call the project live-ready until external checks pass.

@@ -21,8 +21,10 @@ Copy `.env.example` to `.env` and configure the required private values. Start w
 | `META_APP_ID`, `META_APP_SECRET` | Facebook Login app credentials |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | Separate credentials from Instagram API setup with Instagram Login |
 | `META_GRAPH_VERSION` | Defaults to `v24.0`; review compatibility before changing |
-| `PGSSL` | Defaults to verified TLS. Set `disable` only for an intended local/private database connection |
+| `PGSSL` | `verify-full` verifies the server certificate (default); `require` requires encrypted TLS without certificate verification, for Render's self-signed internal Postgres certificate; `disable` turns TLS off and is only for local testing |
 | `NODE_ENV` | Set to `production` on the deployed service |
+
+For a Render-hosted app in the same region, use the database's internal URL. Render's internal Postgres TLS certificate is self-signed, so set `PGSSL=require` to require encryption without certificate verification. Use `verify-full` when the database presents a certificate trusted by the Node.js runtime. See [Render's connection and TLS guidance](https://render.com/docs/postgresql-creating-connecting).
 
 Generate the encryption key locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Save it privately in Render environment settings and a secure backup. Never paste it into a chat or commit it. Losing/changing it makes saved tokens unreadable; key rotation needs an explicit migration. Changing the dashboard password invalidates existing sessions without deleting account connections.
 
