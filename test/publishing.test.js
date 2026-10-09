@@ -214,6 +214,32 @@ test("uploaded Reel files are private to the owner except through their expiring
   assert.equal(expired.status, 404);
 });
 
+
+test("20-Reel batch is accepted, counted for the account, and 21 is rejected", async (t) => {
+  const h = await harness(t, { meta: (url) => json({ id: url.pathname.endsWith("/media") ? "88020" : "99020" }) });
+  const cookie = await h.login(), id = await h.account("instagram", "11020");
+  const assetIds = [];
+  for (let index = 0; index < 20; index++) {
+    const assetId = crypto.randomUUID();
+    assetIds.push(assetId);
+    await h.db.query(
+      `INSERT INTO publisher_media_assets(id,upload_key,payload_hash,access_token_hash,file_name,content_type,size_bytes,data,expires_at)
+       VALUES($1,$2,$3,$4,$5,'video/mp4',16,$6,NOW()+INTERVAL '7 days')`,
+      [assetId, crypto.randomUUID(), `payload-${index}`, `token-hash-${index}`, `reel-${index + 1}.mp4`, mp4(`clip-${index}`)]);
+  }
+  const payload = { connection_id: id, caption: "One caption", interval_minutes: 30, asset_ids: assetIds };
+  const created = await h.request("/api/batches", { method: "POST", cookie,
+    headers: { "idempotency-key": crypto.randomUUID() }, body: payload });
+  assert.equal(created.status, 202);
+  assert.equal(created.data.batch.jobs.length, 20);
+  const accountProgress = (await h.request("/api/progress", { cookie })).data.progress[0];
+  assert.equal(accountProgress.scheduled_count, 20);
+  assert.equal(accountProgress.tracked_count, 20);
+  assert.equal(accountProgress.remaining_count, 180);
+  assert.equal((await h.request("/api/batches", { method: "POST", cookie,
+    headers: { "idempotency-key": crypto.randomUUID() }, body: { ...payload, asset_ids: [...assetIds, crypto.randomUUID()] } })).status, 400);
+});
+
 test("batch shares one caption and publishes Reels in order at the configured interval", async (t) => {
   const mediaRequests = [], published = [];
   const h = await harness(t, { meta: (url, init) => {

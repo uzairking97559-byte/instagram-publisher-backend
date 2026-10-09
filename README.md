@@ -51,7 +51,7 @@ Direct Instagram token refresh is attempted before account use when expiry is wi
 
 ## Dashboard and publishing
 
-Open `/`, sign in with the private dashboard password, then use a configured official connect button. The account list, composer and history work on mobile; `/studio` opens the same dashboard. Bulk mode accepts 1–10 MP4/MOV files from the phone at once, applies one shared caption, and queues them 10, 15 or 30 minutes apart. Each file is limited to 50 MB and active uploaded video storage to 500 MB. Keep the dashboard open while uploading. The first Reel is queued immediately; after a Reel finishes, the next one is scheduled for the selected interval later. If a Reel definitively fails, the batch pauses so the owner can inspect it before continuing. A result that is uncertain is never automatically retried. Single-post mode also accepts public HTTPS media URLs; the backend never fetches arbitrary URLs itself. It rejects local names, literal IP addresses, credentials, non-HTTPS and unusual ports; this is not a DNS-based guarantee that any hostname is public. Meta must be able to retrieve and validate linked media.
+Open `/`, sign in with the private dashboard password, then use a configured official connect button. The account list, composer and history work on mobile; `/studio` opens the same dashboard. Bulk mode accepts 1–20 MP4/MOV files from the phone at once, applies one shared caption, and queues them 10, 15 or 30 minutes apart. Each file is limited to 50 MB and active uploaded video storage to 500 MB. Account cards show a post target (200 by default), posts previously counted by the owner, and live counts of published, scheduled, failed and uncertain requests. Activity shows individual Reel statuses and times. Keep the dashboard open while uploading. The first Reel is queued immediately; after a Reel finishes, the next one is scheduled for the selected interval later. If a Reel definitively fails, the batch pauses so the owner can inspect it before continuing. A result that is uncertain is never automatically retried. Single-post mode also accepts public HTTPS media URLs; the backend never fetches arbitrary URLs itself. It rejects local names, literal IP addresses, credentials, non-HTTPS and unusual ports; this is not a DNS-based guarantee that any hostname is public. Meta must be able to retrieve and validate linked media.
 
 Use a compatible JPEG for photos and a compatible Reel video. Select the account, review the caption and confirm publishing. Request creation saves a receipt before any Meta write. The dashboard then checks the container and finishes publishing once ready, with checks at least 60 seconds apart and a limited number of automatic checks while the page remains open. After closing/reloading the page, use **Check & finish publishing** from history to resume.
 
@@ -79,9 +79,11 @@ All account/job routes require the owner session cookie. All writes require an e
 | `POST /api/accounts/:connectionId/refresh` | Refresh if eligible; report reconnect requirement |
 | `POST /api/publish/image`, `POST /api/publish/reels` | Create idempotent publishing receipt/container |
 | `POST /api/assets` | Upload one private MP4/MOV file (up to 50 MB) |
-| `POST /api/batches` | Queue 1–10 uploaded files with a shared caption and 10/15/30-minute interval |
+| `POST /api/batches` | Queue 1–20 uploaded files with a shared caption and 10/15/30-minute interval |
 | `POST /api/batches/:id/resume` | Continue after a definitively failed Reel |
-| `GET /api/jobs` | Latest 100 receipts, including batch progress |
+| `GET /api/progress` | Per-account target and complete publishing-state counts |
+| `PUT /api/accounts/:connectionId/progress` | Save a post target and the owner's pre-existing scheduled/published count |
+| `GET /api/jobs` | Latest 500 receipts, including batch progress |
 | `POST /api/jobs/:jobId/publish` | Check and finish an existing request, or recover status |
 
 Example photo body (also send the idempotency header):

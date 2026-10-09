@@ -126,3 +126,45 @@ test("login attempts are bounded", async (t) => {
   for (let i = 0; i < 5; i++) assert.equal((await h.request("/auth/login", { method: "POST", body: { password: "wrong" } })).status, 401);
   assert.equal((await h.request("/auth/login", { method: "POST", body: { password: TEST_PASSWORD } })).status, 429);
 });
+
+test("per-account progress counts publishing states and saves a carry-over count", async (t) => {
+  const h = await harness(t);
+  const cookie = await h.login();
+  const id = await h.account("instagram", "50031");
+
+  let result = await h.request("/api/progress", { cookie });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data.progress[0], {
+    connection_id: id, username: "test_creator", account_id: "50031",
+    target_count: 200, baseline_count: 0, published_count: 0,
+    scheduled_count: 0, failed_count: 0, unknown_count: 0,
+    tracked_count: 0, remaining_count: 200
+  });
+
+  for (const status of ["published", "published", "queued", "processing", "publishing", "failed", "unknown"]) {
+    await h.db.query(
+      `INSERT INTO publisher_jobs(id,request_key,payload_hash,account_row_id,account_name,media_type,status)
+       VALUES($1,$2,$3,$4,'test_creator','reel',$5)`,
+      [crypto.randomUUID(), crypto.randomUUID(), `hash-${crypto.randomUUID()}`, id, status]);
+  }
+  result = await h.request("/api/progress", { cookie });
+  assert.equal(result.data.progress[0].published_count, 2);
+  assert.equal(result.data.progress[0].scheduled_count, 3);
+  assert.equal(result.data.progress[0].failed_count, 1);
+  assert.equal(result.data.progress[0].unknown_count, 1);
+  assert.equal(result.data.progress[0].tracked_count, 5);
+  assert.equal(result.data.progress[0].remaining_count, 195);
+
+  result = await h.request(`/api/accounts/${id}/progress`, {
+    method: "PUT", cookie, body: { target_count: 200, baseline_count: 130 }
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.data.progress.baseline_count, 130);
+  assert.equal(result.data.progress.target_count, 200);
+  assert.equal(result.data.progress.tracked_count, 135);
+  assert.equal(result.data.progress.remaining_count, 65);
+  assert.equal((await h.request(`/api/accounts/${id}/progress`, {
+    method: "PUT", cookie, body: { target_count: 100, baseline_count: 130 }
+  })).status, 400);
+  assert.equal((await h.request("/api/progress")).status, 401);
+});
