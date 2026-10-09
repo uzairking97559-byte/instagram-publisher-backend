@@ -4,7 +4,7 @@ An existing Node.js / Express Instagram Publisher backend, with a private mobile
 
 ## Review status
 
-Changes are on `secure-oauth-review` / PR #1. They are not deployed. See `CHECKPOINT.md` for verified checks and the live setup blockers. Real Meta OAuth and posting still require owner acceptance testing. Browser Safe Browsing clearance is not established by this code change.
+The phone-based bulk Reel upload changes are prepared on a feature branch for review; they are not yet deployed to the live Render app. The current live app still accepts public media URLs. Do not use the live site for account access or publishing while Chrome or Google Search Console reports a security warning. A passing test suite does not establish Safe Browsing clearance.
 
 ## Run and test
 
@@ -24,7 +24,7 @@ Copy `.env.example` to `.env` and configure the required private values. Start w
 | `PGSSL` | `verify-full` verifies the server certificate (default); `require` requires encrypted TLS without certificate verification, for Render's self-signed internal Postgres certificate; `disable` turns TLS off and is only for local testing |
 | `NODE_ENV` | Set to `production` on the deployed service |
 
-For a Render-hosted app in the same region, use the database's internal URL. Render's internal Postgres TLS certificate is self-signed, so set `PGSSL=require` to require encryption without certificate verification. Use `verify-full` when the database presents a certificate trusted by the Node.js runtime. See [Render's connection and TLS guidance](https://render.com/docs/postgresql-creating-connecting).
+For a Render-hosted app in the same region, use the database's internal URL. Render's internal Postgres TLS certificate is self-signed, so set `PGSSL=require` to require encryption without certificate verification. Use `verify-full` when the database presents a certificate trusted by the Node.js runtime.
 
 Generate the encryption key locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Save it privately in Render environment settings and a secure backup. Never paste it into a chat or commit it. Losing/changing it makes saved tokens unreadable; key rotation needs an explicit migration. Changing the dashboard password invalidates existing sessions without deleting account connections.
 
@@ -32,7 +32,7 @@ Missing database, encryption key, owner password or a valid callback disables si
 
 ## Database ownership and migration
 
-New tables are named `publisher_sessions`, `publisher_oauth_attempts`, `publisher_accounts`, and `publisher_jobs`. Accounts belong to the private workspace, not a browser session, so sign-out and session expiry do not delete them. Tokens use AES-256-GCM authenticated with provider/account identity.
+New tables are named `publisher_sessions`, `publisher_oauth_attempts`, `publisher_accounts`, `publisher_jobs`, `publisher_batches`, and `publisher_media_assets`. Accounts belong to the private workspace, not a browser session, so sign-out and session expiry do not delete them. Tokens use AES-256-GCM authenticated with provider/account identity. Uploaded videos are stored in Postgres as short-lived private assets and are deleted after expiry when no active job needs them.
 
 The older PR prototype used `connected_accounts` tied to anonymous sessions. If that table contains data, initialization **stops** for an owner-reviewed migration; this version does not drop, delete, or silently adopt it. Do not point an unrelated app at this database. Back up the database and encryption key before production changes. Job idempotency records are retained; deleting them removes retry protection for those requests.
 
@@ -47,11 +47,11 @@ Enable the appropriate Meta products, approved permissions/access level, test ro
 
 OAuth state is random, hashed, expires after ten minutes and is tied to the signed-in owner session. An atomic pending-to-processing claim prevents a concurrent or refreshed callback from exchanging the code twice. Completion/cancellation/failure redirect to a clean dashboard URL. If the process fails after an exchange, start a fresh authorization instead of reusing the old callback URL.
 
-Direct Instagram token refresh is attempted before account use when expiry is within seven days and the token is over 24 hours old. Expired/revoked tokens require fresh authorization. Facebook Page expiry is left unknown rather than inferred from a different token. A refresh endpoint is available for signed-in owner use. **There is no unattended refresh worker or scheduled publishing worker in this version.** A sleeping free service cannot guarantee proactive token renewal for inactive accounts; configure an approved persistent scheduled job before promising unattended operation.
+Direct Instagram token refresh is attempted before account use when expiry is within seven days and the token is over 24 hours old. Expired/revoked tokens require fresh authorization. Facebook Page expiry is left unknown rather than inferred from a different token. A refresh endpoint is available for signed-in owner use. Scheduled batches are processed by a lightweight poller in the web process; this is not a separate always-on worker. A sleeping free service can delay scheduled posts and cannot guarantee exact delivery times. Use an approved always-on worker before promising unattended, time-exact publishing.
 
 ## Dashboard and publishing
 
-Open `/`, sign in with the private dashboard password, then use a configured official connect button. The account list, composer and history work on mobile; `/studio` opens the same dashboard. The composer accepts public HTTPS media URLs. It does not upload files from the phone. The backend never fetches arbitrary media URLs itself. It rejects local names, literal IP addresses, credentials, non-HTTPS and unusual ports; this is not a DNS-based guarantee that any hostname is public. Meta must be able to retrieve and validate the media.
+Open `/`, sign in with the private dashboard password, then use a configured official connect button. The account list, composer and history work on mobile; `/studio` opens the same dashboard. Bulk mode accepts 1–10 MP4/MOV files from the phone at once, applies one shared caption, and queues them 10, 15 or 30 minutes apart. Each file is limited to 50 MB and active uploaded video storage to 500 MB. Keep the dashboard open while uploading. The first Reel is queued immediately; after a Reel finishes, the next one is scheduled for the selected interval later. If a Reel definitively fails, the batch pauses so the owner can inspect it before continuing. A result that is uncertain is never automatically retried. Single-post mode also accepts public HTTPS media URLs; the backend never fetches arbitrary URLs itself. It rejects local names, literal IP addresses, credentials, non-HTTPS and unusual ports; this is not a DNS-based guarantee that any hostname is public. Meta must be able to retrieve and validate linked media.
 
 Use a compatible JPEG for photos and a compatible Reel video. Select the account, review the caption and confirm publishing. Request creation saves a receipt before any Meta write. The dashboard then checks the container and finishes publishing once ready, with checks at least 60 seconds apart and a limited number of automatic checks while the page remains open. After closing/reloading the page, use **Check & finish publishing** from history to resume.
 
@@ -78,7 +78,10 @@ All account/job routes require the owner session cookie. All writes require an e
 | `DELETE /api/accounts/:connectionId` | Remove one connection by database connection ID |
 | `POST /api/accounts/:connectionId/refresh` | Refresh if eligible; report reconnect requirement |
 | `POST /api/publish/image`, `POST /api/publish/reels` | Create idempotent publishing receipt/container |
-| `GET /api/jobs` | Latest 50 receipts |
+| `POST /api/assets` | Upload one private MP4/MOV file (up to 50 MB) |
+| `POST /api/batches` | Queue 1–10 uploaded files with a shared caption and 10/15/30-minute interval |
+| `POST /api/batches/:id/resume` | Continue after a definitively failed Reel |
+| `GET /api/jobs` | Latest 100 receipts, including batch progress |
 | `POST /api/jobs/:jobId/publish` | Check and finish an existing request, or recover status |
 
 Example photo body (also send the idempotency header):
