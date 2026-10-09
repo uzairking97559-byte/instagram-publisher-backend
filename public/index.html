@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#11161c">
+  <title>Creator Publishing Tool</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Creator home"><span class="brand-mark">c</span>creator<span class="brand-dot">.</span></a>
+    <span class="workspace-tag">PUBLISHING WORKSPACE</span>
+    <button id="logout" class="quiet" hidden>Sign out</button>
+  </header>
+  <main>
+    <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="loading" class="login-panel"><p class="eyebrow">CREATOR PUBLISHING TOOL</p><h1>Workspace khul raha hai…</h1></section>
+    <section id="setup" class="login-panel" hidden>
+      <p class="eyebrow">SETUP PENDING</p><h1>Secure workspace ki taiyari.</h1>
+      <p>Database aur private dashboard sign-in configure hone ke baad accounts connect kar sakoge.</p>
+      <button id="setup-retry" class="primary">Dobara check karo</button>
+    </section>
+    <section id="signin" class="login-panel" hidden>
+      <p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Create. Connect.<br><span>Publish with control.</span></h1>
+      <p>Apne connected Instagram professional accounts ko ek jagah manage karo.</p>
+      <form id="login-form">
+        <label for="password">Dashboard password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="Apna private dashboard password">
+        <p class="hint">Yeh workspace ka password hai. Instagram sign-in official Meta page par hoga.</p>
+        <button class="primary" id="login-button">Workspace kholo <span aria-hidden="true">↗</span></button>
+      </form>
+    </section>
+    <div id="workspace" hidden>
+      <nav class="tabs" aria-label="Workspace sections"><a href="#connections">Accounts</a><a href="#composer">Create post</a><a href="#activity">Activity</a></nav>
+      <section class="hero"><div><p class="eyebrow">YOUR CONTENT, IN ONE PLACE</p><h1>Ready when<br><span>inspiration strikes.</span></h1><p>Connect your accounts. Choose your audience.<br>Share your next photo or reel.</p></div><div class="hero-note"><span class="live-dot"></span>Official Meta authorization<span class="muted">Your accounts stay connected after sign-out.</span></div></section>
+      <section id="connections" class="section">
+        <div class="section-title"><div><p class="eyebrow">01 / CONNECTIONS</p><h2>Your Instagram accounts <span id="account-count" class="count">0</span></h2></div><button id="reload" class="quiet">Refresh</button></div>
+        <div class="connect-options">
+          <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Accessible Pages se linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
+          <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Direct professional login · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
+        </div>
+        <div id="accounts" class="accounts"></div>
+      </section>
+      <div class="work-grid">
+        <section id="composer" class="panel">
+          <p class="eyebrow">02 / CREATE</p><h2>Your next post.</h2><p class="muted">Ek account chuno aur publish karne se pehle details check karo.</p>
+          <form id="publish-form">
+            <label for="account">Instagram account</label><select id="account" required><option value="">Pehle account connect karo</option></select>
+            <label for="media-type">Post type</label><select id="media-type"><option value="image">Photo</option><option value="reel">Reel</option></select>
+            <label for="media-url">Public HTTPS media link</label><input id="media-url" type="url" required maxlength="4096" placeholder="https://your-media-site.com/photo.jpg">
+            <p class="hint">Photo: JPEG. Reel: compatible video. Link Meta ko bina login ke khulna chahiye. Local file upload abhi available nahi hai.</p>
+            <label for="caption">Caption <span id="caption-count" class="muted">0 / 2200</span></label><textarea id="caption" rows="4" placeholder="What would you like to share?"></textarea>
+            <label class="check"><input id="confirm-publish" type="checkbox" required><span>Maine account aur content check kiya hai. Is post ko ab publish karna hai.</span></label>
+            <button id="publish-button" class="primary" type="submit">Publish post <span aria-hidden="true">↗</span></button>
+            <p id="publish-progress" class="hint" role="status"></p>
+          </form>
+        </section>
+        <section id="activity" class="panel activity-panel">
+          <div class="section-title"><div><p class="eyebrow">03 / ACTIVITY</p><h2>Publishing history.</h2></div></div>
+          <p class="muted">Recent requests aur unka verified status.</p><div id="jobs"></div>
+          <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
+        </section>
+      </div>
+      <footer>Creator Publishing Tool <span>Private workspace · Official APIs</span></footer>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,78 +1,102 @@
-# Instagram Publisher
+# Creator Publishing Tool
 
-Node.js and Express backend with a small account dashboard for official Instagram publishing.
+An existing Node.js / Express Instagram Publisher backend, with a private mobile dashboard and official Meta authorization. This is a **single-owner workspace**, not a public multi-tenant SaaS. Every person who knows the dashboard password can manage every connected account. Do not share that password with clients.
 
-## Requirements
+## Review status
 
-- Node.js 18 or later
-- A Meta developer app configured for Facebook Login and/or Instagram Login
-- A persistent PostgreSQL database
-- An HTTPS media URL that Meta can fetch for every image or video being published
+Changes are on `secure-oauth-review` / PR #1. They are not deployed. See `CHECKPOINT.md` for verified checks and the live setup blockers. Real Meta OAuth and posting still require owner acceptance testing. Browser Safe Browsing clearance is not established by this code change.
 
-The service deliberately disables OAuth and publishing until PostgreSQL and token encryption are configured. The health route stays available and reports `secureStorageReady: false` when storage is missing.
+## Run and test
 
-## Configure locally
+Use Node.js 22 or newer (verified locally on Node 24). Run `npm ci`, then `npm test`. Tests use Express over local HTTP and PGlite, a local PostgreSQL engine. Meta HTTP responses are mocked; tests never publish to Instagram or contact a real database. PGlite is a development dependency, not the production database.
 
-1. Copy `.env.example` to `.env`.
-2. Add the Meta app ID and secret and make `REDIRECT_URI` match the callback configured in Meta.
-3. Set `DATABASE_URL` to a PostgreSQL connection string.
-4. Generate a base64 encryption key locally. For example, run `node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))"` and put the output in `TOKEN_ENCRYPTION_KEY`. Do not commit or share the key.
-5. Install dependencies with `npm install`, then run `npm start`.
+Copy `.env.example` to `.env` and configure the required private values. Start with `npm start`. In production use a persistent PostgreSQL database and `npm ci --omit=dev`. Keep `.env` out of git.
 
-On first startup, the service creates its required PostgreSQL tables. Keep the encryption key stable: replacing it makes previously stored tokens unreadable.
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Persistent PostgreSQL connection string |
+| `TOKEN_ENCRYPTION_KEY` | Stable, canonical base64 encoding of 32 random bytes |
+| `DASHBOARD_PASSWORD` | Private owner password; 16–256 characters, preferably a generated unique password |
+| `REDIRECT_URI` | Exact canonical callback, e.g. `https://YOUR-SERVICE.onrender.com/auth/meta/callback` |
+| `META_APP_ID`, `META_APP_SECRET` | Facebook Login app credentials |
+| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | Separate credentials from Instagram API setup with Instagram Login |
+| `META_GRAPH_VERSION` | Defaults to `v24.0`; review compatibility before changing |
+| `PGSSL` | Defaults to verified TLS. Set `disable` only for an intended local/private database connection |
+| `NODE_ENV` | Set to `production` on the deployed service |
 
-## Meta app setup
+Generate the encryption key locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Save it privately in Render environment settings and a secure backup. Never paste it into a chat or commit it. Losing/changing it makes saved tokens unreadable; key rotation needs an explicit migration. Changing the dashboard password invalidates existing sessions without deleting account connections.
 
-Configure the exact callback URI:
+Missing database, encryption key, owner password or a valid callback disables sign-in and publishing. `/health` remains a liveness endpoint; `/ready` returns 503 until configuration and database initialization succeed. Database startup retries every minute. Graceful shutdown stops accepting requests and closes database connections.
 
-`https://YOUR-SERVICE.onrender.com/auth/meta/callback`
+## Database ownership and migration
 
-Enable the relevant official API products and permissions:
+New tables are named `publisher_sessions`, `publisher_oauth_attempts`, `publisher_accounts`, and `publisher_jobs`. Accounts belong to the private workspace, not a browser session, so sign-out and session expiry do not delete them. Tokens use AES-256-GCM authenticated with provider/account identity.
 
-- Facebook Login: `instagram_basic`, `instagram_content_publish`, `pages_show_list`, and `pages_read_engagement`. Each Instagram professional account must be linked to a Facebook Page accessible to the authorizing user. One Facebook authorization discovers all accessible linked accounts across paginated Page results.
-- Instagram Login: `instagram_business_basic` and `instagram_business_content_publish`. This is the direct Instagram sign-in flow and does not require the Facebook Page route.
+The older PR prototype used `connected_accounts` tied to anonymous sessions. If that table contains data, initialization **stops** for an owner-reviewed migration; this version does not drop, delete, or silently adopt it. Do not point an unrelated app at this database. Back up the database and encryption key before production changes. Job idempotency records are retained; deleting them removes retry protection for those requests.
 
-The Meta app must have the products and permissions enabled for the intended testers or approved users. Graph API version defaults to `v24.0` and can be changed with `META_GRAPH_VERSION`.
+## Meta authorization
 
-## Routes
+Configure the exact `REDIRECT_URI` in each enabled login product. Facebook and direct Instagram use the same callback route but different app credentials and state-bound providers.
 
-- `GET /health` — health status and whether secure storage is ready.
-- `GET /` — account connection dashboard.\n- `GET /studio` — browser publishing studio for connected accounts.
-- `GET /auth/meta/start` — start Facebook Login.
-- `GET /auth/instagram/start` — start Instagram Login.
-- `GET /auth/meta/callback` — shared OAuth callback; validates and consumes a one-time state value.
-- `GET /api/accounts` — list accounts connected to the browser session. Tokens are never returned.\n- `DELETE /api/accounts/:accountId` — remove the local saved connection for one account; it does not revoke the permission at Meta.
-- `POST /auth/logout` — end the current browser session and remove its saved account records. Meta permissions are not revoked.
-- `POST /api/publish/image` — publish an image.
-- `POST /api/publish/reels` — create a reel container; returns its `creation_id`.
-- `POST /api/publish/reels/:creationId/publish` — check container processing and publish once it is ready.
+- **Facebook Login**: `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`. Discovers eligible professional accounts linked to accessible Facebook Pages, including paginated Page lists. Authorizing one Facebook user only grants accounts they can actually manage; it cannot sign in arbitrary accounts.
+- **Instagram Login**: `instagram_business_basic`, `instagram_business_content_publish`. Direct professional-account authorization does not use Facebook Page discovery. Each account must authorize the app through the official flow. Configure the Instagram credentials from the Instagram API setup, not by copying the Facebook credentials.
 
-Publishing requests use the dashboard's session cookie and must include the same-origin `Origin` header. Example image body:
+Enable the appropriate Meta products, approved permissions/access level, test roles, redirect URLs, privacy policy and data deletion requirements before inviting real users. Test each flow with an eligible owner/test account. No Facebook/Instagram password or verification code is sent to this backend. Meta may request verification or revoke access; this app cannot prevent suspensions or bypass challenges.
+
+OAuth state is random, hashed, expires after ten minutes and is tied to the signed-in owner session. An atomic pending-to-processing claim prevents a concurrent or refreshed callback from exchanging the code twice. Completion/cancellation/failure redirect to a clean dashboard URL. If the process fails after an exchange, start a fresh authorization instead of reusing the old callback URL.
+
+Direct Instagram token refresh is attempted before account use when expiry is within seven days and the token is over 24 hours old. Expired/revoked tokens require fresh authorization. Facebook Page expiry is left unknown rather than inferred from a different token. A refresh endpoint is available for signed-in owner use. **There is no unattended refresh worker or scheduled publishing worker in this version.** A sleeping free service cannot guarantee proactive token renewal for inactive accounts; configure an approved persistent scheduled job before promising unattended operation.
+
+## Dashboard and publishing
+
+Open `/`, sign in with the private dashboard password, then use a configured official connect button. The account list, composer and history work on mobile; `/studio` opens the same dashboard. The composer accepts public HTTPS media URLs. It does not upload files from the phone. The backend never fetches arbitrary media URLs itself. It rejects local names, literal IP addresses, credentials, non-HTTPS and unusual ports; this is not a DNS-based guarantee that any hostname is public. Meta must be able to retrieve and validate the media.
+
+Use a compatible JPEG for photos and a compatible Reel video. Select the account, review the caption and confirm publishing. Request creation saves a receipt before any Meta write. The dashboard then checks the container and finishes publishing once ready, with checks at least 60 seconds apart and a limited number of automatic checks while the page remains open. After closing/reloading the page, use **Check & finish publishing** from history to resume.
+
+Every create request requires a UUIDv4 `Idempotency-Key`. Retry the same request with the **same key and unchanged details**. A different payload with the same key returns 409. A new key is a new operation and may create duplicate content. The UI retains a bounded history of request fingerprints/keys in browser storage, without tokens, captions or media URLs. Same details reuse their prior receipt; intentional repost controls are not implemented. Do not clear storage merely to recover a failed response.
+
+A timeout, invalid success response or lost database write can leave an `unknown` result. Publishing intent is stored before sending the final API call. Later checks only inspect that same container; they do not automatically send the publish call again. `PUBLISHED` recovers the status without inventing a published media ID. If the result remains uncertain, check the actual Instagram account before any new request. This avoids blind retries, not every possible duplicate across distinct requests/devices.
+
+Disconnect removes that saved connection/token, retains publishing history, and prevents later unfinished jobs using it. It does not cancel a Meta API request already in flight or revoke the app permission at Meta. Remove permission in Meta account settings when full revocation is required.
+
+## API
+
+All account/job routes require the owner session cookie. All writes require an exact canonical `Origin` and host. Public API keys, arbitrary access-token request bodies and anonymous publishing are not supported.
+
+| Route | Behavior |
+| --- | --- |
+| `GET /health`, `GET /ready` | Liveness / actual configuration and database readiness |
+| `GET /api/session` | Dashboard sign-in and provider availability |
+| `POST /auth/login`, `POST /auth/logout` | Owner session login/logout |
+| `GET /auth/meta/start` | Facebook authorization |
+| `GET /auth/meta/login` | Compatibility redirect to the correct start route |
+| `GET /auth/instagram/start` | Direct Instagram authorization |
+| `GET /auth/meta/callback` | State-bound callback |
+| `GET /api/accounts` | Safe connection metadata, never tokens |
+| `DELETE /api/accounts/:connectionId` | Remove one connection by database connection ID |
+| `POST /api/accounts/:connectionId/refresh` | Refresh if eligible; report reconnect requirement |
+| `POST /api/publish/image`, `POST /api/publish/reels` | Create idempotent publishing receipt/container |
+| `GET /api/jobs` | Latest 50 receipts |
+| `POST /api/jobs/:jobId/publish` | Check and finish an existing request, or recover status |
+
+Example photo body (also send the idempotency header):
 
 ```json
 {
-  "account_id": "CONNECTED_INSTAGRAM_ACCOUNT_ID",
+  "connection_id": "DATABASE_CONNECTION_ID_FROM_ACCOUNT_LIST",
   "image_url": "https://your-cdn.example/photo.jpg",
   "caption": "Post caption"
 }
 ```
 
-Example reel body:
+For reels use `video_url`. Use the returned `job.id` to check/finish publishing. The previous unshipped `/api/publish/reels/:creationId/publish` route is replaced by the job route. Account selection/removal now uses `connection_id`, so connecting the same Instagram identity by two providers is unambiguous.
 
-```json
-{
-  "account_id": "CONNECTED_INSTAGRAM_ACCOUNT_ID",
-  "video_url": "https://your-cdn.example/reel.mp4",
-  "caption": "Reel caption"
-}
-```
+## Operational boundaries
 
-The photo and video URLs must use HTTPS and be publicly reachable by Meta. The `/studio` page accepts URLs; it does not upload local files. For reels, use the returned `creation_id` to check processing and publish when ready.
+- HTTPS-only production cookies: HttpOnly, SameSite=Lax, opaque random sessions stored hashed. Exact origin checks protect writes; strict CSP and no-referrer headers protect the dashboard/callback.
+- Meta requests have timeouts, reject redirects and use approved hosts. Normal Graph calls use bearer headers. Meta token exchanges/refresh may require secrets in query parameters; application logs never print request URLs or raw provider messages. Ensure proxy/error monitoring also redacts OAuth query strings and credentials.
+- Login and API limits are in-process and bounded. Persistent SQL claims protect publishing across instances, but distributed abuse protection is a separate production requirement before public scale.
+- No real post is created by automated tests. A live smoke test needs explicit owner approval of the exact account/media/caption.
+- Resolve Chrome's reported Dangerous site warning through security investigation and, where applicable, Google Search Console review. Never instruct users to bypass it. Code tests or a green `/health` response do not establish Safe Browsing clearance.
 
-## Security notes
-
-- OAuth state is random, stored hashed in PostgreSQL, expires after ten minutes, and is consumed once. It is bound to the browser session.
-- Session cookies are HTTP-only, SameSite=Lax, and Secure on Render.
-- Access tokens are encrypted with AES-256-GCM before they are written to PostgreSQL.
-- OAuth errors and access tokens are not written to application logs or returned to the dashboard.
-- Do not expose `META_APP_SECRET`, `TOKEN_ENCRYPTION_KEY`, `DATABASE_URL`, or access tokens in chat, source control, or browser code.
+Primary references: [Instagram overview](https://developers.facebook.com/documentation/instagram-platform/overview), [Content publishing](https://developers.facebook.com/documentation/instagram-platform/content-publishing), [Business Login for Instagram](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login), [Meta official Instagram Postman collection](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api).
