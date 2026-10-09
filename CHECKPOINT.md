@@ -20,11 +20,11 @@ Continue the existing repository and PR #1 (`secure-oauth-review`). The review b
 - Headless Chromium checks recorded in the reviewed implementation passed at 390px mobile and 1365px desktop. No physical Android device or live Meta authorization was tested.
 - `npm audit --omit=dev` previously reported 0 known production dependency vulnerabilities at the time checked. This is not a security certification.
 - JavaScript syntax checks and `git diff --check` passed.
-- GitHub Actions run #4 passed on parent review head `394a6955a291f1e7b778d9b71bdf5e27f2d2d8fa` under Node 22.x and 24.x. This TLS repair is a new commit and its CI run must be checked separately. No real Meta request or post was made.
+- GitHub Actions run #5 passed on the TLS repair/test commit `4fc8b2ff88833c5278da5e51be0aed5d966ba2e1` under Node 22.x and 24.x. No real Meta request or post was made. Read the current PR checks before merge.
 
 ## Observed external state
 
-- Immediately before this update, PR #1 was open, unmerged and mergeable on `secure-oauth-review` at parent head `394a6955a291f1e7b778d9b71bdf5e27f2d2d8fa`. This update changes only the review branch; check the latest CI before considering merge.
+- At the start of this checkpoint refresh, PR #1 was open, unmerged and mergeable on `secure-oauth-review` at tested head `4fc8b2ff88833c5278da5e51be0aed5d966ba2e1`. This checkpoint-only follow-up records the verified state; check current CI and branch head before merge or any later edit, using an expected-head lease.
 - Render service `srv-db3p42rtqb8s73esptv0` remains on the Free plan in Ohio and auto-deploys from `main`. Its currently live deploy is still `dep-db3ptvqjnfac738cbn40`, commit `14dd0326ad2b7118c6e5a6915314f63e9f3382ed`; the review code is not deployed.
 - The owner-created Render database `instagram-publisher-db` (`dpg-db4e2ltg1s2s7394qkag-a`) is available in Ohio on plan `0.1c-256mb`, with 1 GB storage. The creation screen showed an estimated total of **$6.30/month** ($6 compute + $0.30 storage), billed by the second. The verified IP allow list is empty, blocking external access.
 - The web service and database share the same Render workspace and Ohio region. Render documents that same-region services use the private internal URL regardless of the external IP allow list; this backend should use that internal URL with `PGSSL=require`. No database credentials or URLs belong in this file.
