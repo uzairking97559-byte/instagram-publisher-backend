@@ -15,6 +15,30 @@ test("missing setup fails closed while health remains compatible", async (t) => 
   assert.equal(h.calls.length, 0);
 });
 
+test("database connection loss fails safely and the readiness check restores service", async (t) => {
+  const h = await harness(t);
+  const cookie = await h.login();
+  const query = h.db.query;
+  let failNextQuery = true;
+  h.db.query = async (...args) => {
+    if (failNextQuery) {
+      failNextQuery = false;
+      const error = new Error("connection reset");
+      error.code = "ECONNRESET";
+      throw error;
+    }
+    return query(...args);
+  };
+  const unavailable = await h.request("/api/accounts", { cookie });
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.data.error, "temporarily_unavailable");
+  assert.equal(h.app.locals.isDatabaseReady(), false);
+  h.db.query = query;
+  assert.equal(await h.app.locals.initialize(), true);
+  assert.equal(h.app.locals.isDatabaseReady(), true);
+  assert.equal((await h.request("/api/accounts", { cookie })).status, 200);
+});
+
 test("dashboard authentication rejects fixation, cross-origin writes and anonymous publishing", async (t) => {
   const h = await harness(t);
   assert.equal((await h.request("/api/accounts")).status, 401);
