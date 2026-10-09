@@ -544,3 +544,29 @@ footer {
     font-size:22px
   }
 }
+
+.independence-notice {
+  margin:24px 0 0;
+  padding:15px 18px;
+  border:1px solid var(--line);
+  border-left:3px solid var(--lime);
+  border-radius:10px;
+  background:var(--panel);
+  font-size:13px
+}
+.independence-notice strong {
+  display:block;
+  font-weight:650
+}
+.independence-notice p {
+  margin:5px 0 0;
+  color:var(--muted);
+  line-height:1.65
+}
+@media (max-width:600px) {
+  .independence-notice {
+    margin-top:16px;
+    padding:13px 14px;
+    font-size:12px
+  }
+}
