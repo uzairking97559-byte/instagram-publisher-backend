@@ -383,7 +383,7 @@ function updatePublishMode() {
 }
 async function uploadAsset(file, attempt) {
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
-  const maxRecoveryChecks = 25;
+  const maxRecoveryChecks = 31;
   async function waitForDatabaseRecovery() {
     for (let check = 0; check < maxRecoveryChecks; check++) {
       $("publish-progress").textContent = `${file.name} ka upload server se confirm nahi hua. Database recover hone ka wait chal raha hai; page khula rakho, button dobara mat dabao.`;
