@@ -214,6 +214,57 @@ test("uploaded Reel files are private to the owner except through their expiring
   assert.equal(expired.status, 404);
 });
 
+test("Meta's video download is streamed in slices: HEAD reads no bytes, Range works, the whole video is never selected", async (t) => {
+  const h = await harness(t), cookie = await h.login();
+  const data = Buffer.concat([mp4("large-reel"), crypto.randomBytes(2 * 1024 * 1024 + 4321)]);
+  const uploaded = await uploadVideo(h, cookie, "large.mp4", data);
+  assert.equal(uploaded.status, 201);
+  const assetId = uploaded.data.asset.asset_id;
+  const token = crypto.createHmac("sha256", h.key).update(`publisher-media-v1:${assetId}`).digest("base64url");
+  const url = `${h.origin}/media/${assetId}/${token}`;
+  const storage = await h.db.query("SELECT attstorage FROM pg_attribute WHERE attrelid='publisher_media_assets'::regclass AND attname='data'");
+  assert.equal(storage.rows[0].attstorage, "e", "videos are stored uncompressed so slices are cheap");
+
+  const query = h.db.query;
+  const mediaQueries = [];
+  h.db.query = async (sql, values) => {
+    if (sql.includes("publisher_media_assets")) mediaQueries.push(sql);
+    return query(sql, values);
+  };
+  const slices = () => mediaQueries.filter((sql) => sql.includes("substring(data")).length;
+
+  const head = await fetch(url, { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get("content-length"), String(data.length));
+  assert.equal(head.headers.get("accept-ranges"), "bytes");
+  assert.equal(slices(), 0, "HEAD reads no video bytes");
+
+  const full = await fetch(url);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get("content-type"), "video/mp4");
+  assert.deepEqual(Buffer.from(await full.arrayBuffer()), data);
+  assert.equal(slices(), 3, "a 2 MB+ video is read as three 1 MB slices");
+
+  const start = 1024 * 1024 - 10, end = 1024 * 1024 + 20;
+  const partial = await fetch(url, { headers: { range: `bytes=${start}-${end}` } });
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get("content-range"), `bytes ${start}-${end}/${data.length}`);
+  assert.equal(partial.headers.get("content-length"), String(end - start + 1));
+  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), data.subarray(start, end + 1));
+
+  const tail = await fetch(url, { headers: { range: "bytes=-100" } });
+  assert.equal(tail.status, 206);
+  assert.deepEqual(Buffer.from(await tail.arrayBuffer()), data.subarray(data.length - 100));
+
+  const beyond = await fetch(url, { headers: { range: `bytes=${data.length}-` } });
+  assert.equal(beyond.status, 416);
+  assert.equal(beyond.headers.get("content-range"), `bytes */${data.length}`);
+  await beyond.arrayBuffer();
+
+  const wholeVideo = mediaQueries.filter((sql) => /^\s*SELECT\b/i.test(sql) && /\bdata\b/.test(sql) && !sql.includes("substring(data"));
+  assert.deepEqual(wholeVideo, [], "no query loads the whole video column");
+});
+
 
 test("20-Reel batch is accepted, counted for the account, and 21 is rejected", async (t) => {
   const h = await harness(t, { meta: (url) => json({ id: url.pathname.endsWith("/media") ? "88020" : "99020" }) });
