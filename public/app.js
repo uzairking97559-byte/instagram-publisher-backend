@@ -383,11 +383,20 @@ function updatePublishMode() {
 }
 async function uploadAsset(file, attempt) {
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
-  const retryDelays = [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000];
-  const waitToRetry = async (delay) => {
-    $("publish-progress").textContent = `${file.name} ke upload ka server response abhi nahi mila. Page khula rakho; button dobara mat dabao.`;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  };
+  const maxRecoveryChecks = 25;
+  async function waitForDatabaseRecovery() {
+    for (let check = 0; check < maxRecoveryChecks; check++) {
+      $("publish-progress").textContent = `${file.name} ka upload server se confirm nahi hua. Database recover hone ka wait chal raha hai; page khula rakho, button dobara mat dabao.`;
+      const delay = check === 0 ? 5000 : 10000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        const ready = await fetch("/ready", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000) });
+        if (ready.ok) return true;
+      } catch { /* The service may still be restarting. */ }
+    }
+    $("publish-progress").textContent = `${file.name} ka upload 5 minute mein confirm nahi hua. Activity check karo; wahi batch dobara submit mat karo.`;
+    return false;
+  }
   for (let retry = 0; ; retry++) {
     let response;
     try {
@@ -395,10 +404,7 @@ async function uploadAsset(file, attempt) {
         headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "Idempotency-Key": key },
         body: file, signal: AbortSignal.timeout(180000) });
     } catch (error) {
-      if (error?.name !== "TimeoutError" && retry < retryDelays.length) {
-        await waitToRetry(retryDelays[retry]);
-        continue;
-      }
+      if (error?.name !== "TimeoutError" && retry < 2 && await waitForDatabaseRecovery()) continue;
       throw { code: "temporarily_unavailable" };
     }
     const data = await response.json().catch(() => ({}));
@@ -407,17 +413,13 @@ async function uploadAsset(file, attempt) {
         $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true;
       }
       const code = data.error || "temporarily_unavailable";
-      // Asset uploads use a stable idempotency key; retrying this step cannot publish a duplicate Reel.
-      if (response.status >= 500 && code === "temporarily_unavailable" && retry < retryDelays.length) {
-        await waitToRetry(retryDelays[retry]);
-        continue;
-      }
+      // Retry only after the service reports ready, preserving the same asset idempotency key.
+      if (response.status >= 500 && code === "temporarily_unavailable" && retry < 2 && await waitForDatabaseRecovery()) continue;
       throw { code };
     }
     return data.asset;
   }
 }
-
 async function boot() {
   try {
     const session = await api("/api/session");
