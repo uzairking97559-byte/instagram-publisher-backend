@@ -139,11 +139,55 @@ test("asset upload stops after bounded database recovery wait without resending 
   const file = { name: "reel.mp4", size: 1024, type: "video/mp4", lastModified: 1 };
 
   await assert.rejects(uploadAsset(file, "batch-attempt"),
-    (error) => error.code === "temporarily_unavailable");
+    (error) => error.code === "upload_recovery_timeout");
   assert.equal(uploads, 1);
   assert.equal(readinessChecks, 31);
   assert.equal(context.delays.length, 31);
   assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 305000);
+});
+
+test("asset upload stops immediately when the phone cannot reach the readiness endpoint", async () => {
+  let uploads = 0;
+  let readinessChecks = 0;
+  const context = testContext(async (path) => {
+    if (path === "/ready") {
+      readinessChecks++;
+      throw new TypeError("Failed to fetch");
+    }
+    uploads++;
+    throw new TypeError("Failed to fetch");
+  });
+  const uploadAsset = loadFunction("uploadAsset", uploadCode, context.globals);
+  const file = { name: "reel.mp4", size: 1024, type: "video/mp4", lastModified: 1 };
+
+  await assert.rejects(uploadAsset(file, "batch-attempt"),
+    (error) => error.code === "upload_network_unreachable");
+  assert.equal(uploads, 1);
+  assert.equal(readinessChecks, 1);
+  assert.deepEqual(context.delays, [5000]);
+  assert.match(context.progress.textContent, /status check/);
+});
+
+test("a timed out upload safely retries the same file after the server is ready", async () => {
+  const uploads = [];
+  const context = testContext(async (path, options) => {
+    if (path === "/ready") return response(200, { ok: true });
+    uploads.push(options);
+    if (uploads.length === 1) {
+      const error = new Error("request timed out");
+      error.name = "TimeoutError";
+      throw error;
+    }
+    return response(201, { asset: { asset_id: "asset-1" } });
+  });
+  const uploadAsset = loadFunction("uploadAsset", uploadCode, context.globals);
+  const file = { name: "reel.mp4", size: 1024, type: "video/mp4", lastModified: 1 };
+
+  const asset = await uploadAsset(file, "batch-attempt");
+  assert.equal(asset.asset_id, "asset-1");
+  assert.equal(uploads.length, 2);
+  assert.equal(uploads[0].headers["Idempotency-Key"], uploads[1].headers["Idempotency-Key"]);
+  assert.deepEqual(context.delays, [5000]);
 });
 test("batch history shows one posted reel and the remaining reels as pending", () => {
   const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
