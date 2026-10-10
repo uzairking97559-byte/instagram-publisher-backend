@@ -362,6 +362,75 @@ test("a definitively failed Reel pauses its batch until the owner continues", as
   assert.equal(paused.rows[0].status, "paused");
   assert.equal(Number(paused.rows[0].next_position), 2);
   assert.equal(paused.rows[0].pause_reason, "permission_required");
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets WHERE id=$1", [first.data.asset.asset_id])).rows.length;
+  }, 200);
+  const kept = (await h.db.query("SELECT id::text AS id FROM publisher_media_assets")).rows.map((row) => row.id);
+  assert.deepEqual(kept, [second.data.asset.asset_id], "the failed Reel's video is freed; the waiting Reel keeps its own");
   assert.equal((await h.request(`/api/batches/${created.data.batch.id}/resume`, { method: "POST", cookie, body: {} })).status, 200);
   await waitFor(async () => (await h.db.query("SELECT status FROM publisher_jobs WHERE batch_id=$1 AND batch_position=2", [created.data.batch.id])).rows[0].status === "failed");
+});
+
+const jobStatus = async (h, id) => (await h.db.query("SELECT status FROM publisher_jobs WHERE id=$1", [id])).rows[0].status;
+
+test("a published Reel's video is deleted while Activity keeps its file name", async (t) => {
+  const h = await harness(t, { meta: (url) => {
+    if (url.pathname.endsWith("/media")) return json({ id: "88200" });
+    if (url.pathname.endsWith("/media_publish")) return json({ id: "99200" });
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login(), id = await h.account("instagram", "11200");
+  const first = await uploadVideo(h, cookie, "keep-name.mp4", mp4("one"));
+  const second = await uploadVideo(h, cookie, "waits.mp4", mp4("two"));
+  const loose = await uploadVideo(h, cookie, "never-batched.mp4", mp4("three"));
+  const expiresInHours = async (assetId) => Number((await h.db.query(
+    "SELECT EXTRACT(EPOCH FROM expires_at-NOW())/3600 AS hours FROM publisher_media_assets WHERE id=$1", [assetId])).rows[0].hours);
+  assert.ok(Math.abs(await expiresInHours(loose.data.asset.asset_id) - 24) < 1, "an upload outside a batch expires after a day");
+
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+    body: { connection_id: id, caption: "c", interval_minutes: 30, asset_ids: [first.data.asset.asset_id, second.data.asset.asset_id] } });
+  assert.equal(created.status, 202);
+  assert.ok(Math.abs(await expiresInHours(second.data.asset.asset_id) - 24 * 7) < 1, "videos in a batch are kept up to a week");
+  const jobId = created.data.batch.jobs[0].id;
+  await waitFor(async () => (await jobStatus(h, jobId)) === "processing", 200);
+  await allowCheck(h, jobId);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, jobId)) === "published"; }, 200);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets WHERE id=$1", [first.data.asset.asset_id])).rows.length;
+  }, 200);
+
+  const kept = (await h.db.query("SELECT id::text AS id FROM publisher_media_assets")).rows.map((row) => row.id).sort();
+  assert.deepEqual(kept, [second.data.asset.asset_id, loose.data.asset.asset_id].sort(), "only the published video is freed");
+  const jobs = (await h.request("/api/jobs", { cookie })).data.jobs;
+  assert.equal(jobs.find((job) => job.id === jobId).media_name, "keep-name.mp4");
+  assert.equal(jobs.find((job) => job.id === jobId).published_media_id, "99200");
+});
+
+test("stopping the scheduler waits for an in-flight publish to be recorded", async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const h = await harness(t, { meta: async (url) => {
+    if (url.pathname.endsWith("/media")) return json({ id: "88300" });
+    if (url.pathname.endsWith("/media_publish")) { await gate; return json({ id: "99300" }); }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login(), id = await h.account("instagram", "11300");
+  const video = await uploadVideo(h, cookie, "drain.mp4", mp4("drain"));
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+    body: { connection_id: id, caption: "c", interval_minutes: 10, asset_ids: [video.data.asset.asset_id] } });
+  const jobId = created.data.batch.jobs[0].id;
+  await waitFor(async () => (await jobStatus(h, jobId)) === "processing", 200);
+  await allowCheck(h, jobId);
+  await waitFor(async () => { void h.app.locals.runPublishingScheduler(); return (await jobStatus(h, jobId)) === "publishing"; }, 200);
+
+  let stopped = false;
+  const stopping = h.app.locals.stopPublishingScheduler().then(() => { stopped = true; });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(stopped, false, "stop waits while the publish call is in flight");
+  release();
+  await stopping;
+  assert.equal(await jobStatus(h, jobId), "published", "the publish is recorded before shutdown continues");
+  assert.equal(await h.app.locals.runPublishingScheduler(), undefined, "no new run starts after stop");
 });

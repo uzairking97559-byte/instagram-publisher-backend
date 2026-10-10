@@ -112,6 +112,11 @@ ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS batch_id UUID REFERENCES pub
 ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS batch_position INTEGER;
 ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS asset_id UUID REFERENCES publisher_media_assets(id) ON DELETE SET NULL;
 ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- The video file name is kept on the job so Activity still shows it after the
+-- video itself is deleted once the Reel is published or has failed.
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS asset_name TEXT;
+UPDATE publisher_jobs j SET asset_name=a.file_name FROM publisher_media_assets a
+  WHERE j.asset_id=a.id AND j.asset_name IS NULL;
 ALTER TABLE publisher_jobs DROP CONSTRAINT IF EXISTS publisher_jobs_status_check;
 ALTER TABLE publisher_jobs ADD CONSTRAINT publisher_jobs_status_check
   CHECK (status IN ('queued', 'creating', 'processing', 'publishing', 'published', 'failed', 'unknown'));

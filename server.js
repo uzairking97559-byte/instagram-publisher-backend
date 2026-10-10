@@ -32,7 +32,9 @@ async function start() {
     clearInterval(retry);
     const deadline = setTimeout(() => process.exit(1), 25000);
     deadline.unref();
+    const scheduler = app.locals.stopPublishingScheduler();
     server.close(async () => {
+      await scheduler;
       await db?.close();
       clearTimeout(deadline);
       process.exit(0);
