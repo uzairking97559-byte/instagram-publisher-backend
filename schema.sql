@@ -80,6 +80,11 @@ ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_item_count_check
 
 ALTER TABLE publisher_media_assets ADD COLUMN IF NOT EXISTS assigned_batch_id UUID REFERENCES publisher_batches(id) ON DELETE SET NULL;
 
+-- Videos are already compressed. Storing them uncompressed out of line skips a
+-- wasted compression buffer on upload and lets substring() read one slice
+-- without loading the whole file (lib/media.js). Applies to new uploads.
+ALTER TABLE publisher_media_assets ALTER COLUMN data SET STORAGE EXTERNAL;
+
 CREATE TABLE IF NOT EXISTS publisher_jobs (
   id UUID PRIMARY KEY,
   request_key TEXT NOT NULL UNIQUE,
