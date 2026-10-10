@@ -9,6 +9,7 @@ const messages = {
   connection_processing: "Yeh connection process ho raha hai. Thodi der baad Refresh dabao; callback ko dobara submit mat karo.",
   connection_cancelled: "Connection cancel hua. Jab ready ho tab dobara connect kar sakte ho.",
   connection_failed: "Connection complete nahi hua. Account list check karo, phir Connect se fresh attempt karo.",
+  connection_permissions: "Meta ne Reel publish karne ki permission nahi di. Connect dobara dabao aur Meta ki screen par saari permissions allow karo, koi untick mat karo.",
   invalid_login: "Dashboard password sahi nahi hai.",
   sign_in_required: "Dashboard mein dobara sign in karo. Saved account connections safe hain.",
   reconnect_required: "Account ki authorization expire ya revoke hui hai. Official login se reconnect karo.",
