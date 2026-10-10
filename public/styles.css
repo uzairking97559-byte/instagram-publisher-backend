@@ -660,3 +660,23 @@ footer {
   text-decoration:underline;
   text-underline-offset:3px
 }
+
+.batch-progress {
+  margin-top:15px
+}
+.batch-progress-heading {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:6px 10px;
+  color:var(--muted);
+  font-size:11px
+}
+.batch-progress-heading strong {
+  color:var(--text);
+  font-size:12px
+}
+.batch-progress .progress-bar {
+  margin:8px 0 0
+}

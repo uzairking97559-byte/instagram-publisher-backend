@@ -199,6 +199,18 @@ function renderAccounts() {
   if (accounts.some((a) => a.connection_id === selected && !a.needs_reconnect)) $("account").value = selected;
   $("publish-button").disabled = busy || !accounts.some((a) => !a.needs_reconnect);
 }
+function summarizeBatch(group, totalCount) {
+  const counts = { total: Number(totalCount) || group.length, published: 0, pending: 0, processing: 0, failed: 0, unknown: 0 };
+  for (const job of group) {
+    if (job.status === "published") counts.published++;
+    else if (job.status === "queued") counts.pending++;
+    else if (["creating", "processing", "publishing"].includes(job.status)) counts.processing++;
+    else if (job.status === "failed") counts.failed++;
+    else if (job.status === "unknown") counts.unknown++;
+  }
+  counts.unlisted = Math.max(0, counts.total - group.length);
+  return counts;
+}
 function renderJobs() {
   $("jobs").replaceChildren();
   if (!jobs.length) $("jobs").append(element("p", "Your next idea starts here. Publish requests yahan dikhengi.", "empty"));
@@ -231,7 +243,24 @@ function renderJobs() {
     const head = element("div", undefined, "job-head");
     head.append(element("strong", `@${first.account} · ${first.batch_count} reels · ${first.interval_minutes} min gap`),
       element("span", names[status] || status, `badge ${status}`));
-    card.append(head);
+    const counts = summarizeBatch(group, first.batch_count);
+    const progress = element("section", undefined, "batch-progress");
+    const summary = element("div", undefined, "batch-progress-heading");
+    const summaryParts = [];
+    if (counts.pending) summaryParts.push(`${counts.pending} pending`);
+    if (counts.processing) summaryParts.push(`${counts.processing} processing`);
+    if (counts.failed) summaryParts.push(`${counts.failed} failed`);
+    if (counts.unknown) summaryParts.push(`${counts.unknown} check needed`);
+    if (counts.unlisted) summaryParts.push(`${counts.unlisted} status missing`);
+    summary.append(element("strong", `${counts.published}/${counts.total} reels posted`),
+      element("span", summaryParts.join(" · ") || "All reels posted"));
+    const progressBar = document.createElement("progress");
+    progressBar.className = "progress-bar";
+    progressBar.max = Math.max(1, counts.total);
+    progressBar.value = counts.published;
+    progressBar.setAttribute("aria-label", `${counts.published} of ${counts.total} reels posted`);
+    progress.append(summary, progressBar);
+    card.append(head, progress);
     for (const job of group) {
       const row = element("div", undefined, "batch-job-row");
       const label = job.media_name || `Reel ${job.batch_position}`;
