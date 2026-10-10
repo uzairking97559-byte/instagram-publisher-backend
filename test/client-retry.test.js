@@ -139,9 +139,9 @@ test("asset upload stops after bounded database recovery wait without resending 
   await assert.rejects(uploadAsset(file, "batch-attempt"),
     (error) => error.code === "temporarily_unavailable");
   assert.equal(uploads, 1);
-  assert.equal(readinessChecks, 25);
-  assert.equal(context.delays.length, 25);
-  assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 245000);
+  assert.equal(readinessChecks, 31);
+  assert.equal(context.delays.length, 31);
+  assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 305000);
 });
 test("batch history shows one posted reel and the remaining reels as pending", () => {
   const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
