@@ -102,9 +102,9 @@ test("asset upload waits for the database before retrying the same file", async 
   const uploads = [];
   const readinessChecks = [];
   const context = testContext(async (path, options) => {
-    if (path === "/ready") {
+    if (path === "/health") {
       readinessChecks.push(options);
-      return response(readinessChecks.length < 2 ? 503 : 200, { ok: readinessChecks.length >= 2 });
+      return response(200, { secureStorageReady: readinessChecks.length >= 2 });
     }
     uploads.push(options);
     return uploads.length === 1
@@ -126,9 +126,9 @@ test("asset upload stops after bounded database recovery wait without resending 
   let uploads = 0;
   let readinessChecks = 0;
   const context = testContext(async (path) => {
-    if (path === "/ready") {
+    if (path === "/health") {
       readinessChecks++;
-      return response(503, { ok: false });
+      return response(200, { secureStorageReady: false });
     }
     uploads++;
     return response(503, { error: "temporarily_unavailable" });
