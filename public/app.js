@@ -390,8 +390,9 @@ async function uploadAsset(file, attempt) {
       const delay = check === 0 ? 5000 : 10000;
       await new Promise((resolve) => setTimeout(resolve, delay));
       try {
-        const ready = await fetch("/ready", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000) });
-        if (ready.ok) return true;
+        const health = await fetch("/health", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000) });
+        const status = await health.json().catch(() => ({}));
+        if (health.ok && status.secureStorageReady === true) return true;
       } catch { /* The service may still be restarting. */ }
     }
     $("publish-progress").textContent = `${file.name} ka upload 5 minute mein confirm nahi hua. Activity check karo; wahi batch dobara submit mat karo.`;
