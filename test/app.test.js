@@ -34,7 +34,9 @@ test("database connection loss fails safely and the readiness check restores ser
   assert.equal(unavailable.data.error, "temporarily_unavailable");
   assert.equal(h.app.locals.isDatabaseReady(), false);
   h.db.query = query;
-  assert.equal(await h.app.locals.initialize(), true);
+  const recovered = await h.request("/ready");
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(recovered.data, { ok: true });
   assert.equal(h.app.locals.isDatabaseReady(), true);
   assert.equal((await h.request("/api/accounts", { cookie })).status, 200);
 });
