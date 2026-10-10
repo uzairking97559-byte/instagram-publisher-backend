@@ -43,6 +43,7 @@ function testContext(fetch, delays = []) {
 
 const apiCode = extractFunction("async function api(path, options = {}) {", "\nfunction renderAccounts() {");
 const uploadCode = extractFunction("async function uploadAsset(file, attempt) {", "\nasync function boot() {");
+const batchSummaryCode = extractFunction("function summarizeBatch(group, totalCount) {", "\nfunction renderJobs() {");
 
 test("batch creation retries transient failures with the same idempotency key", async () => {
   const calls = [];
@@ -115,4 +116,36 @@ test("asset uploads survive a database restart window and reuse one upload key",
   assert.ok(calls.every((call) => call.headers["Idempotency-Key"] === "123e4567-e89b-42d3-a456-426614174000"));
   assert.deepEqual(context.delays, [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000]);
   assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 102000);
+});
+
+test("batch history shows one posted reel and the remaining reels as pending", () => {
+  const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
+  const group = [
+    { status: "published" },
+    ...Array.from({ length: 11 }, () => ({ status: "queued" }))
+  ];
+  const counts = summarizeBatch(group, 12);
+
+  assert.equal(counts.total, 12);
+  assert.equal(counts.published, 1);
+  assert.equal(counts.pending, 11);
+  assert.equal(counts.processing, 0);
+  assert.equal(counts.failed, 0);
+  assert.equal(counts.unknown, 0);
+  assert.equal(counts.unlisted, 0);
+});
+
+test("batch progress keeps processing, failed, unknown, and missing statuses distinct", () => {
+  const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
+  const counts = summarizeBatch([
+    { status: "published" }, { status: "creating" }, { status: "queued" },
+    { status: "failed" }, { status: "unknown" }
+  ], 6);
+
+  assert.equal(counts.published, 1);
+  assert.equal(counts.processing, 1);
+  assert.equal(counts.pending, 1);
+  assert.equal(counts.failed, 1);
+  assert.equal(counts.unknown, 1);
+  assert.equal(counts.unlisted, 1);
 });
