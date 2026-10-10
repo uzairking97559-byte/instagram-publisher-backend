@@ -98,12 +98,16 @@ test("batch creation without a valid idempotency key is never retried", async ()
   assert.deepEqual(context.delays, []);
 });
 
-test("asset uploads survive a database restart window and reuse one upload key", async () => {
-  const calls = [];
-  let count = 0;
-  const context = testContext(async (_path, options) => {
-    calls.push(options);
-    return ++count <= 10
+test("asset upload waits for the database before retrying the same file", async () => {
+  const uploads = [];
+  const readinessChecks = [];
+  const context = testContext(async (path, options) => {
+    if (path === "/ready") {
+      readinessChecks.push(options);
+      return response(readinessChecks.length < 2 ? 503 : 200, { ok: readinessChecks.length >= 2 });
+    }
+    uploads.push(options);
+    return uploads.length === 1
       ? response(503, { error: "temporarily_unavailable" })
       : response(201, { asset: { asset_id: "asset-1" } });
   });
@@ -112,12 +116,33 @@ test("asset uploads survive a database restart window and reuse one upload key",
   const asset = await uploadAsset(file, "batch-attempt");
 
   assert.equal(asset.asset_id, "asset-1");
-  assert.equal(calls.length, 11);
-  assert.ok(calls.every((call) => call.headers["Idempotency-Key"] === "123e4567-e89b-42d3-a456-426614174000"));
-  assert.deepEqual(context.delays, [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000]);
-  assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 102000);
+  assert.equal(uploads.length, 2);
+  assert.equal(readinessChecks.length, 2);
+  assert.ok(uploads.every((call) => call.headers["Idempotency-Key"] === "123e4567-e89b-42d3-a456-426614174000"));
+  assert.deepEqual(context.delays, [5000, 10000]);
 });
 
+test("asset upload stops after bounded database recovery wait without resending the video", async () => {
+  let uploads = 0;
+  let readinessChecks = 0;
+  const context = testContext(async (path) => {
+    if (path === "/ready") {
+      readinessChecks++;
+      return response(503, { ok: false });
+    }
+    uploads++;
+    return response(503, { error: "temporarily_unavailable" });
+  });
+  const uploadAsset = loadFunction("uploadAsset", uploadCode, context.globals);
+  const file = { name: "reel.mp4", size: 1024, type: "video/mp4", lastModified: 1 };
+
+  await assert.rejects(uploadAsset(file, "batch-attempt"),
+    (error) => error.code === "temporarily_unavailable");
+  assert.equal(uploads, 1);
+  assert.equal(readinessChecks, 25);
+  assert.equal(context.delays.length, 25);
+  assert.equal(context.delays.reduce((sum, delay) => sum + delay, 0), 245000);
+});
 test("batch history shows one posted reel and the remaining reels as pending", () => {
   const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
   const group = [
