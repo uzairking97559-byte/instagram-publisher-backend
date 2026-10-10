@@ -40,7 +40,10 @@ const messages = {
   connection_changed: "Account connection change hua. Refresh karke dobara check karo.",
   account_not_found: "Account connection nahi mila. List refresh karo.",
   token_storage_unavailable: "Saved connection abhi read nahi ho raha. Setup check karna zaroori hai.",
-  temporarily_unavailable: "Service abhi available nahi hai. Thodi der baad dobara check karo."
+  temporarily_unavailable: "Server se response nahi mila. Activity check karo; upload ya batch ka status clear hone tak use dobara submit mat karo.",
+  upload_network_unreachable: "Phone se website ka connection toot gaya. Upload confirm nahi hua; Activity check karo, batch pending na ho tabhi same files retry karo.",
+  upload_recovery_timeout: "5 minute tak service ready nahi hui. Activity check karo; batch entry na ho to hi same files retry karo.",
+  upload_timeout: "Video upload ka response time out hua. Activity check karo; batch entry na ho to hi same files retry karo."
 };
 let accounts = [];
 let jobs = [];
@@ -386,19 +389,23 @@ async function uploadAsset(file, attempt) {
   const maxRecoveryChecks = 31;
   async function waitForDatabaseRecovery() {
     for (let check = 0; check < maxRecoveryChecks; check++) {
-      $("publish-progress").textContent = `${file.name} ka upload server se confirm nahi hua. Database recover hone ka wait chal raha hai; page khula rakho, button dobara mat dabao.`;
       const delay = check === 0 ? 5000 : 10000;
+      $("publish-progress").textContent = `${file.name} ka upload confirm nahi hua. Server status check ${check + 1}/${maxRecoveryChecks}; page khula rakho, button dobara mat dabao.`;
       await new Promise((resolve) => setTimeout(resolve, delay));
+      let readiness;
       try {
         // /ready actively reinitializes the database after a transient outage.
         // /health only reports the process-local readiness flag and cannot recover it.
-        const readiness = await fetch("/ready", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000) });
-        const status = await readiness.json().catch(() => ({}));
-        if (readiness.ok && status.ok === true) return true;
-      } catch { /* The service may still be restarting. */ }
+        readiness = await fetch("/ready", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000) });
+      } catch {
+        // A browser/network failure is not evidence that Postgres is recovering.
+        throw { code: "upload_network_unreachable" };
+      }
+      const status = await readiness.json().catch(() => ({}));
+      if (readiness.ok && status.ok === true) return true;
+      if (readiness.status !== 503) throw { code: "temporarily_unavailable" };
     }
-    $("publish-progress").textContent = `${file.name} ka upload 5 minute mein confirm nahi hua. Activity check karo; wahi batch dobara submit mat karo.`;
-    return false;
+    throw { code: "upload_recovery_timeout" };
   }
   for (let retry = 0; ; retry++) {
     let response;
@@ -407,8 +414,11 @@ async function uploadAsset(file, attempt) {
         headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "Idempotency-Key": key },
         body: file, signal: AbortSignal.timeout(180000) });
     } catch (error) {
-      if (error?.name !== "TimeoutError" && retry < 2 && await waitForDatabaseRecovery()) continue;
-      throw { code: "temporarily_unavailable" };
+      if (retry < 2) {
+        await waitForDatabaseRecovery();
+        continue;
+      }
+      throw { code: error?.name === "TimeoutError" ? "upload_timeout" : "upload_network_unreachable" };
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -417,7 +427,10 @@ async function uploadAsset(file, attempt) {
       }
       const code = data.error || "temporarily_unavailable";
       // Retry only after the service reports ready, preserving the same asset idempotency key.
-      if (response.status >= 500 && code === "temporarily_unavailable" && retry < 2 && await waitForDatabaseRecovery()) continue;
+      if (response.status >= 500 && code === "temporarily_unavailable" && retry < 2) {
+        await waitForDatabaseRecovery();
+        continue;
+      }
       throw { code };
     }
     return data.asset;
@@ -510,7 +523,7 @@ $("publish-form").addEventListener("submit", async (event) => {
     explain(error);
     $("publish-progress").textContent = batchScheduled
       ? "Batch save ho gayi hai. History refresh nahi hui—button dobara dabane se pehle Refresh check karo."
-      : "Batch schedule confirm nahi hui. Activity/History check karo; pending entry na ho tabhi dobara submit karo.";
+      : (messages[error?.code] || "Batch schedule confirm nahi hui. Activity/History check karo; pending entry na ho tabhi dobara submit karo.");
   }
   finally { busy = false; renderAccounts(); }
 });
