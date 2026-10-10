@@ -127,6 +127,27 @@ test("direct Instagram flow uses its own credentials and saves encrypted long-li
   assert.ok(new Date(saved.token_expires_at).getTime() > Date.now());
 });
 
+test("a reconnect without the publish permission is refused with a clear notice and never saved", async (t) => {
+  const h = await harness(t, { meta: (url) => {
+    if (url.pathname.endsWith("/oauth/access_token")) return json({ access_token: "test-user-token", expires_in: 5184000 });
+    if (url.pathname.endsWith("/me/permissions")) return json({ data: [
+      { permission: "instagram_basic", status: "granted" }, { permission: "instagram_content_publish", status: "declined" },
+      { permission: "pages_show_list", status: "granted" }, { permission: "pages_read_engagement", status: "granted" }
+    ] });
+    throw new Error("Unexpected Meta route");
+  } });
+  const cookie = await h.login();
+  const start = new URL((await h.request("/auth/meta/start", { cookie })).location);
+  assert.equal(start.searchParams.get("auth_type"), "rerequest", "Facebook must re-ask a declined permission");
+  const result = await h.request(`/auth/meta/callback?state=${start.searchParams.get("state")}&code=test-code`, { cookie });
+  assert.equal(result.location, "/?notice=connection_permissions");
+  const failure = h.logs.find((entry) => entry.event === "oauth_callback_failed");
+  assert.deepEqual({ provider: failure.provider, code: failure.code, missing: failure.missing },
+    { provider: "facebook", code: 200, missing: ["instagram_content_publish"] });
+  assert.doesNotMatch(JSON.stringify(h.logs), /test-user-token|test-code/);
+  assert.equal((await h.db.query("SELECT COUNT(*)::int AS n FROM publisher_accounts")).rows[0].n, 0);
+});
+
 test("OAuth provider errors never leak codes, tokens, secrets or raw provider messages", async (t) => {
   const h = await harness(t, { meta: () => json({ error: { message: "test-private-token test-private-secret", code: 100, error_subcode: 36009 } }, 400) });
   const cookie = await h.login();
