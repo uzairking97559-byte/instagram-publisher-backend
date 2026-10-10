@@ -134,7 +134,7 @@ async function api(path, options = {}) {
   const retryDelays = [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000];
   const waitToRetry = async (delay) => {
     if (idempotentBatch) {
-      $("publish-progress").textContent = `Server se batch save confirm nahi hua. ${Math.ceil(delay / 1000)} sec baad phir koshish hogi.`;
+      $("publish-progress").textContent = "Batch ka server response abhi nahi mila. Page khula rakho; button dobara mat dabao.";
     }
     await new Promise((resolve) => setTimeout(resolve, delay));
   };
@@ -385,7 +385,7 @@ async function uploadAsset(file, attempt) {
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
   const retryDelays = [1000, 2000, 4000, 8000, 12000, 15000, 15000, 15000, 15000, 15000];
   const waitToRetry = async (delay) => {
-    $("publish-progress").textContent = `Server se ${file.name} ka upload confirm nahi hua. ${Math.ceil(delay / 1000)} sec baad phir koshish hogi.`;
+    $("publish-progress").textContent = `${file.name} ke upload ka server response abhi nahi mila. Page khula rakho; button dobara mat dabao.`;
     await new Promise((resolve) => setTimeout(resolve, delay));
   };
   for (let retry = 0; ; retry++) {
@@ -481,7 +481,7 @@ $("publish-form").addEventListener("submit", async (event) => {
       const payload = { connection_id: $("account").value, caption: $("caption").value,
         interval_minutes: Number($("interval-minutes").value), asset_ids: assetIds };
       const key = await requestKey(["batch", payload], attempt);
-      $("publish-progress").textContent = "Batch save ho rahi hai… server se jawab na mile to phir koshish hogi.";
+      $("publish-progress").textContent = "Batch server par save ho rahi hai… page khula rakho; button dobara mat dabao.";
       await api("/api/batches", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload) });
       batchScheduled = true;
       clearBatchAttempt();
