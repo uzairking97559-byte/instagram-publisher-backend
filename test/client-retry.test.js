@@ -220,3 +220,14 @@ test("batch progress keeps processing, failed, unknown, and missing statuses dis
   assert.equal(counts.unknown, 1);
   assert.equal(counts.unlisted, 1);
 });
+
+test("batch progress counts cancelled Reels separately from pending ones", () => {
+  const summarizeBatch = loadFunction("summarizeBatch", batchSummaryCode, {});
+  const counts = summarizeBatch([
+    { status: "published" }, { status: "published" }, { status: "cancelled" }, { status: "cancelled" }, { status: "cancelled" }
+  ], 5);
+  assert.equal(counts.published, 2);
+  assert.equal(counts.cancelled, 3);
+  assert.equal(counts.pending, 0);
+  assert.equal(counts.unlisted, 0);
+});

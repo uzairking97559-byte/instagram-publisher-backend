@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
   next_publish_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   active_job_id UUID,
   status TEXT NOT NULL DEFAULT 'queued'
-    CHECK (status IN ('queued', 'running', 'paused', 'completed')),
+    CHECK (status IN ('queued', 'running', 'paused', 'completed', 'cancelled')),
   pause_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
 ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_item_count_check;
 ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_item_count_check
   CHECK (item_count BETWEEN 1 AND 20);
+-- The owner can cancel the rest of a batch.
+ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_status_check;
+ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_status_check
+  CHECK (status IN ('queued', 'running', 'paused', 'completed', 'cancelled'));
 
 ALTER TABLE publisher_media_assets ADD COLUMN IF NOT EXISTS assigned_batch_id UUID REFERENCES publisher_batches(id) ON DELETE SET NULL;
 
@@ -98,7 +102,7 @@ CREATE TABLE IF NOT EXISTS publisher_jobs (
   scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   creation_id TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'creating'
-    CHECK (status IN ('queued', 'creating', 'processing', 'publishing', 'published', 'failed', 'unknown')),
+    CHECK (status IN ('queued', 'creating', 'processing', 'publishing', 'published', 'failed', 'unknown', 'cancelled')),
   published_media_id TEXT,
   error_code TEXT,
   next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -119,7 +123,7 @@ UPDATE publisher_jobs j SET asset_name=a.file_name FROM publisher_media_assets a
   WHERE j.asset_id=a.id AND j.asset_name IS NULL;
 ALTER TABLE publisher_jobs DROP CONSTRAINT IF EXISTS publisher_jobs_status_check;
 ALTER TABLE publisher_jobs ADD CONSTRAINT publisher_jobs_status_check
-  CHECK (status IN ('queued', 'creating', 'processing', 'publishing', 'published', 'failed', 'unknown'));
+  CHECK (status IN ('queued', 'creating', 'processing', 'publishing', 'published', 'failed', 'unknown', 'cancelled'));
 
 CREATE INDEX IF NOT EXISTS publisher_jobs_created_idx ON publisher_jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS publisher_jobs_batch_idx ON publisher_jobs(batch_id, batch_position);

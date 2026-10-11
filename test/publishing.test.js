@@ -345,6 +345,8 @@ test("batch shares one caption and publishes Reels in order at the configured in
   const final = await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [created.data.batch.id]);
   assert.equal(final.rows[0].status, "completed");
   assert.deepEqual(published, ["88001", "88002"]);
+  assert.equal((await h.request(`/api/batches/${created.data.batch.id}/cancel`, { method: "POST", cookie, body: {} })).status, 409,
+    "a finished batch has nothing to cancel");
 });
 
 test("a definitively failed Reel pauses its batch until the owner continues", async (t) => {
@@ -433,4 +435,86 @@ test("stopping the scheduler waits for an in-flight publish to be recorded", asy
   await stopping;
   assert.equal(await jobStatus(h, jobId), "published", "the publish is recorded before shutdown continues");
   assert.equal(await h.app.locals.runPublishingScheduler(), undefined, "no new run starts after stop");
+});
+
+test("cancelling a batch stops every Reel not yet published and frees their videos", async (t) => {
+  let publishCalls = 0;
+  const h = await harness(t, { meta: (url) => {
+    if (url.pathname.endsWith("/media")) return json({ id: "88400" });
+    if (url.pathname.endsWith("/media_publish")) { publishCalls++; return json({ id: "99400" }); }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login(), id = await h.account("instagram", "11400");
+  const videos = [];
+  for (const name of ["a.mp4", "b.mp4", "c.mp4"]) videos.push((await uploadVideo(h, cookie, name, mp4(name))).data.asset.asset_id);
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+    body: { connection_id: id, caption: "c", interval_minutes: 30, asset_ids: videos } });
+  const batchId = created.data.batch.id;
+  const firstJob = created.data.batch.jobs[0].id;
+  await waitFor(async () => (await jobStatus(h, firstJob)) === "processing", 200);
+
+  assert.equal((await h.request("/api/batches/not-a-uuid/cancel", { method: "POST", cookie, body: {} })).status, 400);
+  assert.equal((await h.request(`/api/batches/${crypto.randomUUID()}/cancel`, { method: "POST", cookie, body: {} })).status, 404);
+  assert.equal((await h.request(`/api/batches/${batchId}/cancel`, { method: "POST", body: {} })).status, 401, "owner sign-in required");
+  const cancelled = await h.request(`/api/batches/${batchId}/cancel`, { method: "POST", cookie, body: {} });
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.data.batch.status, "cancelled");
+  assert.deepEqual(cancelled.data.batch.jobs.map((job) => job.status), ["cancelled", "cancelled", "cancelled"]);
+  assert.equal(cancelled.data.batch.jobs[0].media_name, "a.mp4");
+  const batchRow = (await h.db.query("SELECT active_job_id FROM publisher_batches WHERE id=$1", [batchId])).rows[0];
+  assert.equal(batchRow.active_job_id, null);
+
+  // The cancelled Reel's Meta container is never published, by the worker or a manual check.
+  await allowCheck(h, firstJob);
+  await h.app.locals.runPublishingScheduler();
+  assert.equal((await check(h, cookie, firstJob)).data.job.status, "cancelled");
+  assert.equal(publishCalls, 0);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets")).rows.length;
+  }, 200);
+
+  assert.equal((await h.request(`/api/batches/${batchId}/cancel`, { method: "POST", cookie, body: {} })).data.batch.status, "cancelled", "cancel is repeatable");
+  assert.equal((await h.request(`/api/batches/${batchId}/resume`, { method: "POST", cookie, body: {} })).status, 409, "a cancelled batch cannot be resumed");
+  assert.equal((await h.request("/api/progress", { cookie })).data.progress[0].scheduled_count, 0);
+  assert.equal(publishCalls, 0);
+});
+
+test("a Reel already being published when the batch is cancelled still finishes, and nothing after it starts", async (t) => {
+  let release, mediaCreates = 0;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const h = await harness(t, { meta: async (url) => {
+    if (url.pathname.endsWith("/media")) { mediaCreates++; return json({ id: "88500" }); }
+    if (url.pathname.endsWith("/media_publish")) { await gate; return json({ id: "99500" }); }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login(), id = await h.account("instagram", "11500");
+  const one = await uploadVideo(h, cookie, "one.mp4", mp4("one"));
+  const two = await uploadVideo(h, cookie, "two.mp4", mp4("two"));
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+    body: { connection_id: id, caption: "c", interval_minutes: 10, asset_ids: [one.data.asset.asset_id, two.data.asset.asset_id] } });
+  const batchId = created.data.batch.id;
+  const [firstJob, secondJob] = created.data.batch.jobs.map((job) => job.id);
+  await waitFor(async () => (await jobStatus(h, firstJob)) === "processing", 200);
+  await allowCheck(h, firstJob);
+  await waitFor(async () => { void h.app.locals.runPublishingScheduler(); return (await jobStatus(h, firstJob)) === "publishing"; }, 200);
+
+  const cancelled = await h.request(`/api/batches/${batchId}/cancel`, { method: "POST", cookie, body: {} });
+  assert.equal(cancelled.status, 200);
+  assert.deepEqual(cancelled.data.batch.jobs.map((job) => job.status), ["publishing", "cancelled"]);
+
+  release();
+  await waitFor(async () => {
+    const row = (await h.db.query("SELECT status,active_job_id FROM publisher_batches WHERE id=$1", [batchId])).rows[0];
+    return row.active_job_id === null;
+  }, 200);
+  const jobs = (await h.request("/api/jobs", { cookie })).data.jobs;
+  assert.equal(jobs.find((job) => job.id === firstJob).status, "published");
+  assert.equal(jobs.find((job) => job.id === firstJob).published_media_id, "99500");
+  assert.equal(jobs.find((job) => job.id === secondJob).status, "cancelled");
+  assert.equal((await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [batchId])).rows[0].status, "cancelled");
+
+  await h.db.query("UPDATE publisher_batches SET next_publish_at=NOW()-INTERVAL '1 hour' WHERE id=$1", [batchId]);
+  await h.app.locals.runPublishingScheduler();
+  assert.equal(mediaCreates, 1, "the cancelled second Reel is never sent to Meta");
 });
