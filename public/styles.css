@@ -85,19 +85,22 @@ main {
   display:flex;
   gap:30px;
   font-size:13px;
-  padding:22px 0;
+  padding:18px 0;
   border-bottom:1px solid var(--line);
-  color:var(--muted)
+  color:var(--muted);
+  position:sticky;
+  top:0;
+  z-index:5;
+  background:var(--bg)
 }
 .tabs a:hover {
   color:var(--lime)
 }
-.hero {
-  display:flex;
-  align-items:flex-end;
-  justify-content:space-between;
-  gap:32px;
-  padding:55px 0 46px
+.tabs+.section {
+  border-top:0
+}
+#connections,#composer,#activity {
+  scroll-margin-top:60px
 }
 .eyebrow {
   font-size:10px;
@@ -125,27 +128,9 @@ h2 {
   font-weight:600;
   margin:0 0 14px
 }
-.hero p:not(.eyebrow),.login-panel>p:not(.eyebrow) {
+.login-panel>p:not(.eyebrow) {
   color:var(--muted);
   font-size:15px
-}
-.hero-note {
-  flex:0 1 270px;
-  border-left:1px solid var(--line);
-  padding:10px 0 10px 24px;
-  font-size:12px
-}
-.hero-note .muted {
-  display:block;
-  margin-top:10px
-}
-.live-dot {
-  display:inline-block;
-  width:7px;
-  height:7px;
-  background:var(--lime);
-  border-radius:50%;
-  margin-right:8px
 }
 .section {
   padding:30px 0;
@@ -548,12 +533,6 @@ footer {
   main {
     padding:0 24px
   }
-  .hero-note {
-    display:none
-  }
-  .hero {
-    padding:40px 0 30px
-  }
   .accounts {
     grid-template-columns:1fr 1fr
   }
@@ -581,9 +560,6 @@ footer {
   .brand {
     font-size:23px
   }
-  .hero h1 {
-    font-size:39px
-  }
   .connect-options,.accounts {
     grid-template-columns:1fr
   }
@@ -603,10 +579,8 @@ footer {
     font-size:36px
   }
   .tabs {
-    gap:25px
-  }
-  .hero p:not(.eyebrow) {
-    font-size:13px
+    gap:25px;
+    padding:14px 0
   }
   input:not([type=checkbox]),select,textarea {
     font-size:16px
@@ -690,4 +664,15 @@ footer {
 }
 .batch-progress .progress-bar {
   margin:8px 0 0
+}
+.job-card p.batch-error {
+  color:var(--danger)
+}
+.batch-details {
+  margin-top:12px
+}
+.batch-details summary {
+  cursor:pointer;
+  color:var(--lime);
+  font-size:11px
 }
