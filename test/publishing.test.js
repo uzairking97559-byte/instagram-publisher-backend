@@ -537,3 +537,21 @@ test("the storage limit comes from MEDIA_STORAGE_LIMIT_MB and the dashboard can 
   assert.equal(second.data.error, "upload_storage_full");
   assert.equal((await h.request("/api/storage", { cookie })).data.storage.used_bytes, first.length, "a refused upload stores nothing");
 });
+
+test("batch gaps from 5 minutes to 1 hour are accepted and other gaps are refused", async (t) => {
+  let containers = 0;
+  const h = await harness(t, { meta: (url) => url.pathname.endsWith("/media")
+    ? json({ id: String(88600 + ++containers) }) : json({ status_code: "IN_PROGRESS" }) });
+  const cookie = await h.login(), id = await h.account("instagram", "11600");
+  async function batchWith(interval) {
+    const video = await uploadVideo(h, cookie, `gap-${interval}.mp4`, mp4(`gap-${interval}`));
+    return h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+      body: { connection_id: id, caption: "c", interval_minutes: interval, asset_ids: [video.data.asset.asset_id] } });
+  }
+  for (const interval of [5, 60]) {
+    const created = await batchWith(interval);
+    assert.equal(created.status, 202, `${interval} minutes is allowed`);
+    assert.equal(created.data.batch.interval_minutes, interval);
+  }
+  for (const interval of [0, 7, 90]) assert.equal((await batchWith(interval)).status, 400, `${interval} minutes is refused`);
+});
