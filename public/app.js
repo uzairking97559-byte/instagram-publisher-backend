@@ -36,6 +36,8 @@ const messages = {
   invalid_progress_settings: "Target 1–10,000 aur pehle se ki ginti 0 se target ke beech rakho.",
   asset_unavailable: "Koi selected video upload nahi hui ya pehle se queue mein hai. Videos dobara select karke upload karo.",
   batch_cannot_resume: "Is batch ko continue nahi kar sakte. Pehle uncertain Reel ka status check karo.",
+  batch_cannot_cancel: "Ye batch pehle hi poora ho chuka hai, cancel karne ko kuch nahi bacha.",
+  batch_not_found: "Batch nahi mila. Activity refresh karo.",
   idempotency_conflict: "Is request ki details badal gayi hain. History check karke page refresh karo.",
   connection_removed: "Is job ka account connection remove ho gaya hai.",
   connection_changed: "Account connection change hua. Refresh karke dobara check karo.",
@@ -204,13 +206,14 @@ function renderAccounts() {
   $("publish-button").disabled = busy || !accounts.some((a) => !a.needs_reconnect);
 }
 function summarizeBatch(group, totalCount) {
-  const counts = { total: Number(totalCount) || group.length, published: 0, pending: 0, processing: 0, failed: 0, unknown: 0 };
+  const counts = { total: Number(totalCount) || group.length, published: 0, pending: 0, processing: 0, failed: 0, unknown: 0, cancelled: 0 };
   for (const job of group) {
     if (job.status === "published") counts.published++;
     else if (job.status === "queued") counts.pending++;
     else if (["creating", "processing", "publishing"].includes(job.status)) counts.processing++;
     else if (job.status === "failed") counts.failed++;
     else if (job.status === "unknown") counts.unknown++;
+    else if (job.status === "cancelled") counts.cancelled++;
   }
   counts.unlisted = Math.max(0, counts.total - group.length);
   return counts;
@@ -218,7 +221,7 @@ function summarizeBatch(group, totalCount) {
 function renderJobs() {
   $("jobs").replaceChildren();
   if (!jobs.length) $("jobs").append(element("p", "Your next idea starts here. Publish requests yahan dikhengi.", "empty"));
-  const names = { queued: "QUEUED", creating: "CREATING", processing: "PROCESSING", publishing: "CONFIRMING", published: "PUBLISHED", failed: "FAILED", unknown: "CHECK NEEDED" };
+  const names = { queued: "QUEUED", creating: "CREATING", processing: "PROCESSING", publishing: "CONFIRMING", published: "PUBLISHED", failed: "FAILED", unknown: "CHECK NEEDED", cancelled: "CANCELLED" };
   const batches = new Map();
   const singles = [];
   for (const job of jobs) {
@@ -240,7 +243,8 @@ function renderJobs() {
     group.sort((a, b) => a.batch_position - b.batch_position);
     const card = element("article", undefined, "job-card batch-card");
     const first = group[0];
-    const status = first.batch_status === "completed"
+    const status = first.batch_status === "cancelled" ? "cancelled"
+      : first.batch_status === "completed"
       ? (group.some((job) => job.status === "failed") ? "failed" : "published")
       : group.find((job) => job.status === "unknown")?.status || group.find((job) => job.status === "failed")?.status
         || group.find((job) => job.status === "processing" || job.status === "publishing" || job.status === "creating")?.status || "queued";
@@ -255,6 +259,7 @@ function renderJobs() {
     if (counts.processing) summaryParts.push(`${counts.processing} processing`);
     if (counts.failed) summaryParts.push(`${counts.failed} failed`);
     if (counts.unknown) summaryParts.push(`${counts.unknown} check needed`);
+    if (counts.cancelled) summaryParts.push(`${counts.cancelled} cancelled`);
     if (counts.unlisted) summaryParts.push(`${counts.unlisted} status missing`);
     summary.append(element("strong", `${counts.published}/${counts.total} reels posted`),
       element("span", summaryParts.join(" · ") || "All reels posted"));
@@ -272,7 +277,7 @@ function renderJobs() {
         element("span", names[job.status] || job.status, `badge ${job.status}`));
       card.append(row);
       if (job.status === "queued") card.append(element("p", `Publish target: ${new Date(job.scheduled_at).toLocaleString()}`));
-      if (job.error_code) card.append(element("p", messages[job.error_code] || "History check karke request ka status dobara dekho."));
+      if (job.error_code && job.status !== "cancelled") card.append(element("p", messages[job.error_code] || "History check karke request ka status dobara dekho."));
       if (job.published_media_id) card.append(element("p", `Published media: ${job.published_media_id}`));
       addAction(card, job);
     }
@@ -289,6 +294,28 @@ function renderJobs() {
         });
         card.append(resume);
       }
+    }
+    if (first.batch_status === "cancelled") {
+      card.append(element("p", "Ye batch cancel hai. Baaki Reels post nahi hongi."));
+    }
+    const cancellable = ["queued", "running", "paused"].includes(first.batch_status)
+      && group.some((job) => ["queued", "creating", "processing"].includes(job.status));
+    if (cancellable) {
+      const cancel = element("button", "Cancel remaining reels", "job-action danger");
+      cancel.type = "button";
+      cancel.addEventListener("click", async () => {
+        const left = group.filter((job) => ["queued", "creating", "processing"].includes(job.status)).length;
+        if (!window.confirm(`Is batch ki baaki ${left} Reel(s) cancel karein? Ye wapas start nahi hongi. Jo Reel is waqt publish ho rahi hai, wo nahi rukegi.`)) return;
+        cancel.disabled = true;
+        try {
+          const { batch } = await api(`/api/batches/${first.batch_id}/cancel`, { method: "POST", body: "{}" });
+          const stopped = batch.jobs.filter((job) => job.status === "cancelled").length;
+          const still = batch.jobs.filter((job) => job.status === "publishing").length;
+          notice(`${stopped} Reel(s) cancel ho gayi.${still ? " Ek Reel pehle hi publish ho rahi thi, wo post ho sakti hai." : ""}`);
+          await refresh();
+        } catch (error) { explain(error); cancel.disabled = false; }
+      });
+      card.append(cancel);
     }
     $("jobs").append(card);
   }

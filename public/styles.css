@@ -412,6 +412,13 @@ textarea {
   font-size:11px;
   margin-top:12px
 }
+.job-action.danger {
+  border-color:#7a4a46;
+  color:var(--danger)
+}
+.job-action+.job-action {
+  margin-left:8px
+}
 button:disabled {
   opacity:.45;
   cursor:wait
@@ -465,6 +472,10 @@ button:disabled {
 .badge.unknown,.badge.failed {
   background:#4a3233;
   color:var(--danger)
+}
+.badge.cancelled {
+  background:#262c35;
+  color:var(--muted)
 }
 .activity-note {
   margin-top:28px;
