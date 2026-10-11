@@ -31,7 +31,7 @@ const messages = {
   invalid_video_format: "MP4 ya MOV video select karo.",
   upload_too_large: "Har video 50 MB se chhoti honi chahiye.",
   request_too_large: "Har video 50 MB se chhoti honi chahiye.",
-  upload_storage_full: "Pending uploads ki storage limit bhar gayi. History mein purane reels complete hone do.",
+  upload_storage_full: "Storage limit bhar gayi. Queue ki Reels post hone do (har Reel post hote hi uski jagah khaali hoti hai), ya kam videos chuno.",
   invalid_batch: "1–20 videos, account, caption aur 10/15/30 minute ka gap select karo.",
   invalid_progress_settings: "Target 1–10,000 aur pehle se ki ginti 0 se target ke beech rakho.",
   asset_unavailable: "Koi selected video upload nahi hui ya pehle se queue mein hai. Videos dobara select karke upload karo.",
@@ -51,6 +51,7 @@ const messages = {
 let accounts = [];
 let jobs = [];
 let progress = [];
+let storage = null;
 let busy = false;
 let pendingPollTimer = null;
 let lastNoticeCode = null;
@@ -65,7 +66,7 @@ function notice(text, error = false, code = null) {
 }
 function explain(error) {
   const code = error?.code || null;
-  notice(messages[code] || "Request complete nahi hui. History check karke existing request dobara check karo.", true, code);
+  notice(error?.detail || messages[code] || "Request complete nahi hui. History check karke existing request dobara check karo.", true, code);
 }
 function clearTemporaryUnavailable() {
   if (lastNoticeCode !== "temporarily_unavailable") return;
@@ -331,9 +332,11 @@ function renderJobs() {
   }
 }
 async function refresh() {
-  const [accountData, jobData, progressData] = await Promise.all([api("/api/accounts"), api("/api/jobs"), api("/api/progress")]);
+  const [accountData, jobData, progressData, storageData] = await Promise.all([api("/api/accounts"), api("/api/jobs"), api("/api/progress"),
+    api("/api/storage").catch(() => null)]);
   accounts = accountData.accounts; jobs = jobData.jobs; progress = progressData.progress;
-  renderAccounts(); renderJobs();
+  storage = storageData?.storage || null;
+  renderAccounts(); renderJobs(); updateFileSummary();
   clearTemporaryUnavailable();
   const pending = jobs.some((job) => ["queued", "creating", "processing", "publishing"].includes(job.status));
   if (pending && !pendingPollTimer) pendingPollTimer = setInterval(() => { void refresh().catch(explain); }, 30000);
@@ -391,14 +394,20 @@ function clearBatchAttempt() {
   try { sessionStorage.removeItem("publisher-batch-attempt"); } catch {}
 }
 function formatBytes(value) {
-  return value < 1024 * 1024 ? `${Math.ceil(value / 1024)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 function selectedFiles() { return [...($("reel-files").files || [])]; }
+function storageText() {
+  return storage ? `Storage: ${formatBytes(storage.used_bytes)} / ${formatBytes(storage.limit_bytes)} use, ${formatBytes(storage.free_bytes)} khaali.` : "";
+}
 function updateFileSummary() {
   const files = selectedFiles();
-  if (!files.length) { $("file-summary").textContent = "1–20 MP4/MOV files. Har file 50 MB tak; pending uploads ke liye total storage limit 500 MB hai."; return; }
+  if (!files.length) { $("file-summary").textContent = `1–20 MP4/MOV files. Har file 50 MB tak. ${storageText()}`.trim(); return; }
   const total = files.reduce((sum, file) => sum + file.size, 0);
-  $("file-summary").textContent = `${files.length} videos · total ${formatBytes(total)} · ${files.map((file) => file.name).join(", ")}`;
+  const room = storage ? ` · ${formatBytes(storage.free_bytes)} khaali` : "";
+  $("file-summary").textContent = `${files.length} videos · total ${formatBytes(total)}${room} · ${files.map((file) => file.name).join(", ")}`;
 }
 function updatePublishMode() {
   const batch = $("upload-mode").value === "batch";
@@ -514,8 +523,18 @@ $("publish-form").addEventListener("submit", async (event) => {
     if ($("upload-mode").value === "batch") {
       const files = selectedFiles();
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (files.length < 1 || files.length > 20 || files.some((file) => file.size > 50 * 1024 * 1024) || totalBytes > 500 * 1024 * 1024) {
+      if (files.length < 1 || files.length > 20 || files.some((file) => file.size > 50 * 1024 * 1024)) {
         throw { code: files.some((file) => file.size > 50 * 1024 * 1024) ? "upload_too_large" : "invalid_batch" };
+      }
+      // Check free space first so a too-large selection uploads nothing.
+      // Uploads not yet in a batch are usually this same attempt's earlier
+      // files, which are not stored twice, so they count as available here.
+      const latest = await api("/api/storage").then((data) => data.storage).catch(() => null);
+      if (latest) {
+        storage = latest; updateFileSummary();
+        if (totalBytes > latest.free_bytes + latest.unbatched_bytes) {
+          throw { code: "upload_storage_full", detail: `Storage mein abhi ${formatBytes(latest.free_bytes)} khaali hai, aur chuni hui videos ${formatBytes(totalBytes)} ki hain. Kam videos chuno, ya queue ki Reels post hone do; har Reel post hote hi uski jagah khaali hoti hai.` };
+        }
       }
       const attempt = batchAttemptId();
       const assetIds = [];
@@ -551,7 +570,7 @@ $("publish-form").addEventListener("submit", async (event) => {
     explain(error);
     $("publish-progress").textContent = batchScheduled
       ? "Batch save ho gayi hai. History refresh nahi hui—button dobara dabane se pehle Refresh check karo."
-      : (messages[error?.code] || "Batch schedule confirm nahi hui. Activity/History check karo; pending entry na ho tabhi dobara submit karo.");
+      : (error?.detail || messages[error?.code] || "Batch schedule confirm nahi hui. Activity/History check karo; pending entry na ho tabhi dobara submit karo.");
   }
   finally { busy = false; renderAccounts(); }
 });
