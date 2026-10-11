@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
   account_row_id BIGINT REFERENCES publisher_accounts(id) ON DELETE SET NULL,
   account_name TEXT NOT NULL,
   caption TEXT NOT NULL,
-  interval_minutes INTEGER NOT NULL CHECK (interval_minutes IN (10, 15, 30)),
+  interval_minutes INTEGER NOT NULL CHECK (interval_minutes IN (5, 10, 15, 20, 30, 45, 60)),
   item_count INTEGER NOT NULL CHECK (item_count BETWEEN 1 AND 20),
   next_position INTEGER NOT NULL DEFAULT 1,
   next_publish_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS publisher_batches (
 ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_item_count_check;
 ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_item_count_check
   CHECK (item_count BETWEEN 1 AND 20);
+-- Gaps between Reels: 5 minutes to 1 hour (keep in sync with BATCH_INTERVALS).
+ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_interval_minutes_check;
+ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_interval_minutes_check
+  CHECK (interval_minutes IN (5, 10, 15, 20, 30, 45, 60));
 -- The owner can cancel the rest of a batch.
 ALTER TABLE publisher_batches DROP CONSTRAINT IF EXISTS publisher_batches_status_check;
 ALTER TABLE publisher_batches ADD CONSTRAINT publisher_batches_status_check

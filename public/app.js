@@ -32,7 +32,7 @@ const messages = {
   upload_too_large: "Har video 50 MB se chhoti honi chahiye.",
   request_too_large: "Har video 50 MB se chhoti honi chahiye.",
   upload_storage_full: "Storage limit bhar gayi. Queue ki Reels post hone do (har Reel post hote hi uski jagah khaali hoti hai), ya kam videos chuno.",
-  invalid_batch: "1–20 videos, account, caption aur 10/15/30 minute ka gap select karo.",
+  invalid_batch: "1–20 videos, account, caption aur 5 minute se 1 ghante tak ka gap select karo.",
   invalid_progress_settings: "Target 1–10,000 aur pehle se ki ginti 0 se target ke beech rakho.",
   asset_unavailable: "Koi selected video upload nahi hui ya pehle se queue mein hai. Videos dobara select karke upload karo.",
   batch_cannot_resume: "Is batch ko continue nahi kar sakte. Pehle uncertain Reel ka status check karo.",
