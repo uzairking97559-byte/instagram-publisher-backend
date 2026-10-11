@@ -388,7 +388,7 @@ test("a published Reel's video is deleted while Activity keeps its file name", a
   const loose = await uploadVideo(h, cookie, "never-batched.mp4", mp4("three"));
   const expiresInHours = async (assetId) => Number((await h.db.query(
     "SELECT EXTRACT(EPOCH FROM expires_at-NOW())/3600 AS hours FROM publisher_media_assets WHERE id=$1", [assetId])).rows[0].hours);
-  assert.ok(Math.abs(await expiresInHours(loose.data.asset.asset_id) - 24) < 1, "an upload outside a batch expires after a day");
+  assert.ok(Math.abs(await expiresInHours(loose.data.asset.asset_id) - 3) < 0.1, "an upload outside a batch expires after 3 hours");
 
   const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
     body: { connection_id: id, caption: "c", interval_minutes: 30, asset_ids: [first.data.asset.asset_id, second.data.asset.asset_id] } });
@@ -517,4 +517,23 @@ test("a Reel already being published when the batch is cancelled still finishes,
   await h.db.query("UPDATE publisher_batches SET next_publish_at=NOW()-INTERVAL '1 hour' WHERE id=$1", [batchId]);
   await h.app.locals.runPublishingScheduler();
   assert.equal(mediaCreates, 1, "the cancelled second Reel is never sent to Meta");
+});
+
+test("the storage limit comes from MEDIA_STORAGE_LIMIT_MB and the dashboard can read free space", async (t) => {
+  const limit = 1024 * 1024;
+  const h = await harness(t, { env: { MEDIA_STORAGE_LIMIT_MB: "1" } });
+  const cookie = await h.login();
+  assert.equal((await h.request("/api/storage")).status, 401, "owner sign-in required");
+  const empty = (await h.request("/api/storage", { cookie })).data.storage;
+  assert.deepEqual([empty.used_bytes, empty.unbatched_bytes, empty.limit_bytes, empty.free_bytes], [0, 0, limit, limit]);
+
+  const first = Buffer.concat([mp4("first"), Buffer.alloc(600 * 1024)]);
+  assert.equal((await uploadVideo(h, cookie, "first.mp4", first)).status, 201);
+  const after = (await h.request("/api/storage", { cookie })).data.storage;
+  assert.deepEqual([after.used_bytes, after.unbatched_bytes, after.free_bytes], [first.length, first.length, limit - first.length]);
+
+  const second = await uploadVideo(h, cookie, "second.mp4", Buffer.concat([mp4("second"), Buffer.alloc(600 * 1024)]));
+  assert.equal(second.status, 413);
+  assert.equal(second.data.error, "upload_storage_full");
+  assert.equal((await h.request("/api/storage", { cookie })).data.storage.used_bytes, first.length, "a refused upload stores nothing");
 });
