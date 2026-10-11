@@ -52,6 +52,7 @@ let accounts = [];
 let jobs = [];
 let progress = [];
 let storage = null;
+const openBatches = new Set();
 let busy = false;
 let pendingPollTimer = null;
 let lastNoticeCode = null;
@@ -219,6 +220,13 @@ function summarizeBatch(group, totalCount) {
   counts.unlisted = Math.max(0, counts.total - group.length);
   return counts;
 }
+// "9:03 AM" today, "12 Oct, 9:03 AM" on another day.
+function formatWhen(value) {
+  const date = new Date(value);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toDateString() === new Date().toDateString() ? time
+    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
+}
 function renderJobs() {
   $("jobs").replaceChildren();
   if (!jobs.length) $("jobs").append(element("p", "Your next idea starts here. Publish requests yahan dikhengi.", "empty"));
@@ -231,6 +239,8 @@ function renderJobs() {
   }
   function addAction(card, job) {
     if (!["processing", "unknown", "publishing"].includes(job.status)) return;
+    // The server finishes batch Reels on its own; only an uncertain one needs the owner.
+    if (job.batch_id && job.status !== "unknown") return;
     const action = element("button", job.status === "processing" ? "Check & finish publishing" : "Check existing request", "job-action");
     action.type = "button";
     action.addEventListener("click", async () => {
@@ -271,16 +281,33 @@ function renderJobs() {
     progressBar.setAttribute("aria-label", `${counts.published} of ${counts.total} reels posted`);
     progress.append(summary, progressBar);
     card.append(head, progress);
+    // Each distinct problem is explained once for the batch, not under every Reel.
+    const problems = [...new Set(group.filter((job) => job.error_code && job.status !== "cancelled").map((job) => job.error_code))];
+    for (const code of problems) card.append(element("p", messages[code] || "History check karke request ka status dobara dekho.", "batch-error"));
+    // A finished batch shows only its summary; its Reels open on tap.
+    const finished = ["completed", "cancelled"].includes(first.batch_status)
+      && !group.some((job) => ["unknown", "publishing", "processing", "creating"].includes(job.status));
+    let list = card;
+    if (finished) {
+      const details = element("details", undefined, "batch-details");
+      // Stay open across the 30-second refresh that re-renders this list.
+      details.open = openBatches.has(first.batch_id);
+      details.addEventListener("toggle", () => {
+        if (details.open) openBatches.add(first.batch_id); else openBatches.delete(first.batch_id);
+      });
+      details.append(element("summary", `${group.length} Reels dekho`));
+      card.append(details);
+      list = details;
+    }
     for (const job of group) {
       const row = element("div", undefined, "batch-job-row");
       const label = job.media_name || `Reel ${job.batch_position}`;
       row.append(element("span", `Reel ${job.batch_position}/${job.batch_count} · ${label}`),
         element("span", names[job.status] || job.status, `badge ${job.status}`));
-      card.append(row);
-      if (job.status === "queued") card.append(element("p", `Publish target: ${new Date(job.scheduled_at).toLocaleString()}`));
-      if (job.error_code && job.status !== "cancelled") card.append(element("p", messages[job.error_code] || "History check karke request ka status dobara dekho."));
-      if (job.published_media_id) card.append(element("p", `Published media: ${job.published_media_id}`));
-      addAction(card, job);
+      list.append(row);
+      if (job.status === "queued") list.append(element("p", `Publish target: ${formatWhen(job.scheduled_at)}`));
+      if (job.published_media_id) list.append(element("p", `Published media: ${job.published_media_id}`));
+      addAction(list, job);
     }
     if (first.batch_status === "paused") {
       card.append(element("p", "Batch ruk gaya hai. Failed Reel check kar lo; baaki queue abhi publish nahi hogi."));
