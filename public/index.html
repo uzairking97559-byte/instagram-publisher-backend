@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#11161c">
+  <meta name="theme-color" content="#0f1419">
   <meta name="description" content="Independent publishing tool for Instagram professional accounts. Not affiliated with Meta, Instagram, or Facebook.">
   <meta name="google-site-verification" content="MROBwDCPPAiPYeE0p6GYG6FaPTRaJoPBAk2V28kVHMs">
   <meta name="google-site-verification" content="dV_cktYN1k6J_JSh3nx0MvQTatjW4Int9kUhmnkuxfQ">
@@ -18,7 +18,7 @@
     <button id="logout" class="quiet" hidden>Sign out</button>
   </header>
   <main>
-    <aside class="independence-notice" aria-label="Service information">
+    <aside id="independence" class="independence-notice" aria-label="Service information">
       <strong>Independent app · Meta se affiliation nahi hai.</strong>
       <p>Yeh app Meta, Instagram ya Facebook ki official service nahi hai. Dashboard password sirf is app ke liye hai—Instagram/Facebook password yahan mat daalein. Account connect karne par sign-in Meta ke official page par hoga. <a href="/about.html">Service details</a>.</p>
     </aside>
@@ -40,18 +40,42 @@
       </form>
     </section>
     <div id="workspace" hidden>
-      <nav class="tabs" aria-label="Workspace sections"><a href="#connections">Accounts</a><a href="#composer">Create post</a><a href="#activity">Activity</a></nav>
-      <section id="connections" class="section">
-        <div class="section-title"><div><p class="eyebrow">01 / CONNECTIONS</p><h2>Your Instagram accounts <span id="account-count" class="count">0</span></h2></div><button id="reload" class="quiet">Refresh</button></div>
-        <div class="connect-options">
-          <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Official Facebook sign-in · Linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
-          <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Official Instagram sign-in · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
+      <div class="appbar">
+        <div class="switcher">
+          <span id="switcher-avatar" class="avatar all" aria-hidden="true">∗</span>
+          <span class="switcher-text">
+            <strong id="switcher-name">Sabhi accounts</strong>
+            <span id="switcher-meta">Account chuno</span>
+          </span>
+          <span class="switcher-chevron" aria-hidden="true"></span>
+          <select id="account-filter" aria-label="Account chuno"><option value="all">Sabhi accounts</option></select>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Workspace sections">
+          <button id="tab-connections" type="button" role="tab" aria-controls="connections" aria-selected="true">Accounts</button>
+          <button id="tab-composer" type="button" role="tab" aria-controls="composer" aria-selected="false" tabindex="-1">Create post</button>
+          <button id="tab-activity" type="button" role="tab" aria-controls="activity" aria-selected="false" tabindex="-1">Activity</button>
+        </div>
+      </div>
+
+      <section id="connections" class="view" role="tabpanel" aria-labelledby="tab-connections">
+        <div class="view-head">
+          <div><h2>Accounts <span id="account-count" class="count">0</span></h2><p id="accounts-scope" class="muted">Kisi account pe tap karo, sirf uski details dikhegi.</p></div>
+          <button id="reload" class="quiet" type="button">Refresh</button>
         </div>
         <div id="accounts" class="accounts"></div>
+        <details id="add-account" class="add-account">
+          <summary><span class="plus" aria-hidden="true">+</span>Naya account connect karo</summary>
+          <div class="connect-options">
+            <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Official Instagram sign-in · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
+            <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Official Facebook sign-in · Linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
+          </div>
+          <p class="hint">Connect button isi website ke andar se dabao. Har account ko Meta app mein Instagram Tester hona chahiye.</p>
+        </details>
       </section>
-      <div class="work-grid">
-        <section id="composer" class="panel">
-          <p class="eyebrow">02 / CREATE</p><h2>Your next post.</h2><p class="muted">Ek account chuno aur publish karne se pehle details check karo.</p>
+
+      <section id="composer" class="view" role="tabpanel" aria-labelledby="tab-composer" hidden>
+        <div class="panel">
+          <h2>Create post</h2><p class="muted">Account chuno, videos select karo aur caption ke saath schedule karo.</p>
           <form id="publish-form">
             <label for="account">Instagram account</label><select id="account" required><option value="">Pehle account connect karo</option></select>
             <label for="upload-mode">Publish mode</label>
@@ -74,14 +98,18 @@
             <button id="publish-button" class="primary" type="submit">Upload aur schedule batch <span aria-hidden="true">↗</span></button>
             <p id="publish-progress" class="hint" role="status"></p>
           </form>
-        </section>
-        <section id="activity" class="panel activity-panel">
-          <div class="section-title"><div><p class="eyebrow">03 / ACTIVITY</p><h2>Publishing history.</h2></div></div>
-          <p class="muted">Recent requests aur unka verified status.</p><div id="jobs"></div>
-          <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
-        </section>
-      </div>
-      <footer>Creator Publishing Tool <span>Independent service · Uses Meta’s published APIs</span></footer>
+        </div>
+      </section>
+
+      <section id="activity" class="view" role="tabpanel" aria-labelledby="tab-activity" hidden>
+        <div class="view-head">
+          <div><h2>Activity</h2><p id="activity-scope" class="muted">Sabhi accounts ki history</p></div>
+        </div>
+        <div id="jobs" class="jobs"></div>
+        <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
+      </section>
+
+      <footer><span>Creator Publishing Tool</span><span>Independent service · Meta se affiliated nahi · <a href="/about.html">Service details</a></span></footer>
     </div>
   </main>
 </body>

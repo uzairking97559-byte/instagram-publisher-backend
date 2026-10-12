@@ -694,3 +694,23 @@ test("a queued Reel whose account is gone fails clearly instead of being marked 
   assert.equal(jobs[1].batch_status, "completed");
   assert.equal(h.calls.filter((call) => call.url.pathname.endsWith("/media")).length, 1, "the second Reel never reaches Meta");
 });
+
+test("Activity can be limited to the account picked in the dashboard", async (t) => {
+  const h = await harness(t, { meta: (url) => json(url.pathname.endsWith("/media")
+    ? { id: url.pathname.includes("/12001/") ? "88991" : "88992" } : { status_code: "IN_PROGRESS" }) });
+  const cookie = await h.login();
+  const first = await h.account("instagram", "12001", { username: "first_page" });
+  const second = await h.account("instagram", "12002", { username: "second_page" });
+  const one = (await createRequest(h, cookie, first).send()).data.job;
+  const two = (await createRequest(h, cookie, second).send()).data.job;
+  assert.deepEqual((await h.request("/api/jobs", { cookie })).data.jobs.map((job) => job.id).sort(), [one.id, two.id].sort());
+  const only = await h.request(`/api/jobs?connection_id=${second}`, { cookie });
+  assert.equal(only.status, 200);
+  assert.deepEqual(only.data.jobs.map((job) => [job.id, job.account]), [[two.id, "second_page"]]);
+  assert.deepEqual((await h.request("/api/jobs?connection_id=99999", { cookie })).data.jobs, []);
+  for (const bad of ["abc", "1.5", "1234567890123456789", ""]) {
+    assert.equal((await h.request(`/api/jobs?connection_id=${encodeURIComponent(bad)}`, { cookie })).status, 400, `rejects ${JSON.stringify(bad)}`);
+  }
+  assert.equal((await h.request(`/api/jobs?connection_id=${first}&connection_id=${second}`, { cookie })).status, 400);
+  assert.equal((await h.request(`/api/jobs?connection_id=${second}`)).status, 401, "owner sign-in required");
+});
