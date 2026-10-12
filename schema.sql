@@ -131,6 +131,8 @@ ALTER TABLE publisher_jobs ADD CONSTRAINT publisher_jobs_status_check
 
 CREATE INDEX IF NOT EXISTS publisher_jobs_created_idx ON publisher_jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS publisher_jobs_batch_idx ON publisher_jobs(batch_id, batch_position);
+-- One account's Activity and its post counts.
+CREATE INDEX IF NOT EXISTS publisher_jobs_account_idx ON publisher_jobs(account_row_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS publisher_batches_due_idx ON publisher_batches(status, next_publish_at);
 CREATE INDEX IF NOT EXISTS publisher_media_assets_expiry_idx ON publisher_media_assets(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS publisher_jobs_asset_id_idx ON publisher_jobs(asset_id) WHERE asset_id IS NOT NULL;
