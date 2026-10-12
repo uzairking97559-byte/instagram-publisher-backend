@@ -20,7 +20,7 @@ const messages = {
   creation_uncertain: "Media request ka result clear nahi hai. Is request ko automatically dobara nahi bheja jayega.",
   publish_uncertain: "Post publish hui ya nahi, abhi confirm nahi hai. Pehle Instagram check karo; nayi duplicate request mat banao.",
   media_processing_failed: "Meta media process nahi kar saka. Format aur public link check karo.",
-  container_expired: "Media container expire ho gaya. Content check karke naya request bana sakte ho.",
+  container_expired: "Ye Reel 24 ghante mein publish nahi ho payi, isliye Meta pe expire ho gayi. Account theek hai ya nahi check karo, phir video dobara upload karo.",
   origin_rejected: "Website ko uske configured HTTPS address par seedha kholo.",
   login_rate_limit: "Bahut login attempts hue. 15 minute baad try karo.",
   request_rate_limit: "Bahut requests hui. Ek minute rukkar try karo.",
@@ -193,7 +193,7 @@ function renderAccounts() {
     const remove = element("button", "Disconnect", "quiet");
     remove.type = "button";
     remove.addEventListener("click", async () => {
-      if (!confirm(`@${name} ka saved connection remove karna hai? In-progress publishing pehle check kar lo. Meta permission alag se revoke karni hogi.`)) return;
+      if (!confirm(`@${name} ka saved connection remove karna hai? Is account ki jo Reels abhi queue mein hain, wo cancel ho jayengi. Meta permission alag se revoke karni hogi.`)) return;
       remove.disabled = true;
       try { await api(`/api/accounts/${account.connection_id}`, { method: "DELETE" }); await refresh(); }
       catch (error) { explain(error); remove.disabled = false; }
@@ -324,7 +324,13 @@ function renderJobs() {
       }
     }
     if (first.batch_status === "cancelled") {
-      card.append(element("p", "Ye batch cancel hai. Baaki Reels post nahi hongi."));
+      // Say why when the batch was closed for the owner rather than by them.
+      const reason = group.find((job) => job.status === "cancelled")?.error_code;
+      const notes = {
+        batch_expired: "Ye batch ek hafte mein poora nahi hua, isliye apne aap band ho gaya. Iski videos storage se hata di gayi.",
+        connection_removed: "Is account ka connection hata diya gaya, isliye baaki Reels cancel ho gayi."
+      };
+      card.append(element("p", notes[reason] || "Ye batch cancel hai. Baaki Reels post nahi hongi."));
     }
     const cancellable = ["queued", "running", "paused"].includes(first.batch_status)
       && group.some((job) => ["queued", "creating", "processing"].includes(job.status));

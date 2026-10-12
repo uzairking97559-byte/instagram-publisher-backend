@@ -555,3 +555,142 @@ test("batch gaps from 5 minutes to 1 hour are accepted and other gaps are refuse
   }
   for (const interval of [0, 7, 90]) assert.equal((await batchWith(interval)).status, 400, `${interval} minutes is refused`);
 });
+
+async function batchFor(h, cookie, id, names, interval = 5) {
+  const assetIds = [];
+  for (const name of names) assetIds.push((await uploadVideo(h, cookie, name, mp4(name))).data.asset.asset_id);
+  const created = await h.request("/api/batches", { method: "POST", cookie, headers: { "idempotency-key": crypto.randomUUID() },
+    body: { connection_id: id, caption: "c", interval_minutes: interval, asset_ids: assetIds } });
+  assert.equal(created.status, 202);
+  return { ...created.data.batch, assetIds };
+}
+const batchJobs = async (h, cookie, batchId) => (await h.request("/api/jobs", { cookie })).data.jobs
+  .filter((job) => job.batch_id === batchId).sort((a, b) => a.batch_position - b.batch_position);
+
+test("an account that stops working does not hold up another account, and its waiting Reel fails after Meta's 24 hours", async (t) => {
+  const published = [];
+  const h = await harness(t, { meta: (url) => {
+    if (url.pathname.endsWith("/11700/media")) return json({ id: "88701" });
+    if (url.pathname.endsWith("/11701/media")) return json({ id: "88702" });
+    if (url.pathname.endsWith("/88701")) return json({ error: { code: 190, message: "test session invalidated" } }, 400);
+    if (url.pathname.endsWith("/media_publish")) { published.push(url.pathname); return json({ id: "99702" }); }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login();
+  const broken = await h.account("instagram", "11700", { username: "broken_page" });
+  const healthy = await h.account("instagram", "11701", { username: "healthy_page" });
+  const stuckBatch = await batchFor(h, cookie, broken, ["stuck-1.mp4", "stuck-2.mp4"]);
+  const stuckJob = stuckBatch.jobs[0].id;
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, stuckJob)) === "processing"; }, 200);
+  const okBatch = await batchFor(h, cookie, healthy, ["ok-1.mp4"]);
+  const okJob = okBatch.jobs[0].id;
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, okJob)) === "processing"; }, 200);
+
+  // Meta stops accepting the broken account's token while its Reel is processing.
+  await allowCheck(h, stuckJob);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return (await h.db.query("SELECT needs_reconnect FROM publisher_accounts WHERE id=$1", [broken])).rows[0].needs_reconnect;
+  }, 200);
+  // Both Reels are due, the broken one first. It cannot be checked; the healthy one still publishes.
+  await h.db.query("UPDATE publisher_jobs SET next_check_at=NOW()-INTERVAL '1 minute' WHERE id=$1", [stuckJob]);
+  await allowCheck(h, okJob);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, okJob)) === "published"; }, 200);
+  assert.ok(h.logs.some((entry) => entry.event === "scheduled_worker_failed" && entry.reason === "reconnect_required"),
+    "the broken account's Reel was tried first and could not be checked");
+  assert.deepEqual(published.map((path) => path.split("/").at(-2)), ["11701"]);
+  assert.equal((await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [okBatch.id])).rows[0].status, "completed");
+  assert.equal(await jobStatus(h, stuckJob), "processing", "reconnecting within a day could still finish it");
+
+  // A day later Meta has deleted the container, so the Reel fails and its batch pauses.
+  await h.db.query("UPDATE publisher_jobs SET updated_at=NOW()-INTERVAL '25 hours',next_check_at=NOW()-INTERVAL '1 second' WHERE id=$1", [stuckJob]);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, stuckJob)) === "failed"; }, 200);
+  const jobs = await batchJobs(h, cookie, stuckBatch.id);
+  assert.deepEqual(jobs.map((job) => [job.status, job.error_code]), [["failed", "container_expired"], ["queued", null]]);
+  assert.equal(jobs[0].batch_status, "paused");
+  assert.equal(jobs[0].batch_pause_reason, "container_expired");
+  assert.equal(published.length, 1, "nothing was published for the broken account");
+});
+
+test("a batch still paused when its videos expire closes on its own and frees them", async (t) => {
+  const h = await harness(t, { meta: (url) => url.pathname.endsWith("/media")
+    ? json({ error: { code: 10, message: "test rejection" } }, 400)
+    : json({ status_code: "FINISHED" }) });
+  const cookie = await h.login(), id = await h.account("instagram", "11800");
+  const batch = await batchFor(h, cookie, id, ["first.mp4", "second.mp4", "third.mp4"]);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets WHERE id=$1", [batch.assetIds[0]])).rows.length;
+  }, 200);
+  await h.app.locals.runPublishingScheduler();
+  assert.equal((await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [batch.id])).rows[0].status, "paused",
+    "within the week a paused batch keeps its videos so it can continue");
+  assert.equal((await h.db.query("SELECT COUNT(*)::int AS n FROM publisher_media_assets")).rows[0].n, 2);
+
+  await h.db.query("UPDATE publisher_media_assets SET expires_at=NOW()-INTERVAL '1 second' WHERE assigned_batch_id=$1", [batch.id]);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets")).rows.length;
+  }, 200);
+  const jobs = await batchJobs(h, cookie, batch.id);
+  assert.deepEqual(jobs.map((job) => [job.status, job.error_code]),
+    [["failed", "permission_required"], ["cancelled", "batch_expired"], ["cancelled", "batch_expired"]]);
+  assert.equal(jobs[0].batch_status, "cancelled");
+  assert.equal((await h.request(`/api/batches/${batch.id}/resume`, { method: "POST", cookie, body: {} })).status, 409);
+  assert.equal(h.calls.filter((call) => call.url.pathname.endsWith("/media")).length, 1, "nothing else is sent to Meta");
+});
+
+test("disconnecting an account cancels its unfinished batches, frees their videos and leaves other accounts alone", async (t) => {
+  const published = [];
+  const h = await harness(t, { meta: (url) => {
+    if (url.pathname.endsWith("/11900/media")) return json({ id: "88901" });
+    if (url.pathname.endsWith("/11901/media")) return json({ id: "88902" });
+    if (url.pathname.endsWith("/media_publish")) { published.push(url.pathname); return json({ id: "99902" }); }
+    return json({ status_code: "FINISHED" });
+  } });
+  const cookie = await h.login();
+  const gone = await h.account("instagram", "11900", { username: "gone_page" });
+  const kept = await h.account("instagram", "11901", { username: "kept_page" });
+  const goneBatch = await batchFor(h, cookie, gone, ["gone-1.mp4", "gone-2.mp4"]);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, goneBatch.jobs[0].id)) === "processing"; }, 200);
+  const keptBatch = await batchFor(h, cookie, kept, ["kept-1.mp4"]);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, keptBatch.jobs[0].id)) === "processing"; }, 200);
+
+  assert.equal((await h.request(`/api/accounts/${gone}`, { method: "DELETE", cookie })).status, 200);
+  assert.equal((await h.request(`/api/accounts/${gone}`, { method: "DELETE", cookie })).status, 404);
+  const goneJobs = await batchJobs(h, cookie, goneBatch.id);
+  assert.deepEqual(goneJobs.map((job) => [job.status, job.error_code]), [["cancelled", "connection_removed"], ["cancelled", "connection_removed"]]);
+  assert.equal(goneJobs[0].batch_status, "cancelled");
+  assert.equal(goneJobs[0].account, "gone_page", "history keeps the account name");
+  assert.equal((await h.db.query("SELECT active_job_id FROM publisher_batches WHERE id=$1", [goneBatch.id])).rows[0].active_job_id, null);
+
+  await allowCheck(h, goneBatch.jobs[0].id);
+  await allowCheck(h, keptBatch.jobs[0].id);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, keptBatch.jobs[0].id)) === "published"; }, 200);
+  await waitFor(async () => {
+    await h.app.locals.runPublishingScheduler();
+    return !(await h.db.query("SELECT 1 FROM publisher_media_assets")).rows.length;
+  }, 200);
+  assert.deepEqual(published.map((path) => path.split("/").at(-2)), ["11901"], "only the connected account publishes");
+  assert.equal(await jobStatus(h, goneBatch.jobs[0].id), "cancelled");
+  const accounts = (await h.request("/api/accounts", { cookie })).data.accounts;
+  assert.deepEqual(accounts.map((account) => account.connection_id), [kept]);
+});
+
+test("a queued Reel whose account is gone fails clearly instead of being marked uncertain", async (t) => {
+  const h = await harness(t, { meta: (url) => url.pathname.endsWith("/media")
+    ? json({ error: { code: 10, message: "test rejection" } }, 400)
+    : json({ status_code: "FINISHED" }) });
+  const cookie = await h.login(), id = await h.account("instagram", "11950");
+  const batch = await batchFor(h, cookie, id, ["one.mp4", "two.mp4"]);
+  await waitFor(async () => (await h.db.query("SELECT status FROM publisher_batches WHERE id=$1", [batch.id])).rows[0].status === "paused", 200);
+  // A connection removed before disconnecting stopped batches leaves account-less Reels behind.
+  await h.db.query("UPDATE publisher_jobs SET account_row_id=NULL WHERE batch_id=$1", [batch.id]);
+  await h.db.query("UPDATE publisher_batches SET account_row_id=NULL WHERE id=$1", [batch.id]);
+  assert.equal((await h.request(`/api/batches/${batch.id}/resume`, { method: "POST", cookie, body: {} })).status, 200);
+  await waitFor(async () => { await h.app.locals.runPublishingScheduler(); return (await jobStatus(h, batch.jobs[1].id)) === "failed"; }, 200);
+  const jobs = await batchJobs(h, cookie, batch.id);
+  assert.equal(jobs[1].error_code, "connection_removed");
+  assert.equal(jobs[1].batch_status, "completed");
+  assert.equal(h.calls.filter((call) => call.url.pathname.endsWith("/media")).length, 1, "the second Reel never reaches Meta");
+});
