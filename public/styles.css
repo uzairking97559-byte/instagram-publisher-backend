@@ -375,9 +375,11 @@ textarea { resize: vertical; min-height: 110px; }
 .progress-bar::-webkit-progress-value { background: var(--accent); border-radius: 99px; }
 .progress-bar::-moz-progress-bar { background: var(--accent); border-radius: 99px; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.stat { padding: 10px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--sunken); text-align: center; }
+.stat { padding: 10px 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--sunken); text-align: center; }
 .stat strong { display: block; font-size: 19px; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.stat span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.25; color: var(--muted); }
+/* Labels wrap only between words ("Check needed"), never inside one ("Schedule-d"),
+   and shrink a little on narrow phones or with a larger system font. */
+.stat span { display: block; margin-top: 2px; font-size: clamp(10px, 2.8vw, 11.5px); line-height: 1.25; color: var(--muted); overflow-wrap: normal; word-break: normal; }
 .stat.good strong { color: var(--accent); }
 .stat.bad strong { color: var(--danger); }
 .progress-details { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
@@ -388,6 +390,8 @@ textarea { resize: vertical; min-height: 110px; }
 .progress-form input { padding: 9px 10px; }
 .progress-form .quiet { margin-top: 12px; }
 .account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.account-actions .profile-link { grid-column: 1 / -1; gap: 10px; }
+.profile-link .provider-icon { flex: 0 0 24px; height: 24px; border-radius: 7px; font-size: 15px; font-weight: normal; }
 /* Disconnect is rare and destructive: a quiet text button on its own line. */
 .account-actions .danger { grid-column: 1 / -1; justify-self: start; min-height: 32px; margin-top: 4px; padding: 4px 0; border: 0; font-size: 13px; }
 
