@@ -339,9 +339,28 @@ function accountCard(account) {
     try { await api(`/api/accounts/${account.connection_id}`, { method: "DELETE" }); await refresh(); }
     catch (error) { explain(error); remove.disabled = false; }
   });
-  actions.append(post, history, remove);
+  actions.append(post, history);
+  if (account.username) actions.append(profileLink(account.username));
+  actions.append(remove);
   card.append(actions);
   return card;
+}
+// The account's Instagram page. On Android it opens straight in the Instagram
+// app (or the website when the app is not installed); elsewhere in a new tab.
+function profileLink(username) {
+  const web = `https://www.instagram.com/${encodeURIComponent(username)}/`;
+  const link = element("a", undefined, "quiet profile-link");
+  if (/Android/i.test(navigator.userAgent)) {
+    link.href = `intent://instagram.com/_u/${encodeURIComponent(username)}/#Intent;package=com.instagram.android;scheme=https;S.browser_fallback_url=${encodeURIComponent(web)};end`;
+  } else {
+    link.href = web; link.target = "_blank"; link.rel = "noopener noreferrer";
+  }
+  const icon = element("span", "◎", "provider-icon instagram");
+  icon.setAttribute("aria-hidden", "true");
+  const arrow = element("span", "↗");
+  arrow.setAttribute("aria-hidden", "true");
+  link.append(icon, element("span", "Instagram pe profile kholo"), arrow);
+  return link;
 }
 // Create post follows the picked account; with "all" the owner chooses one here.
 function renderComposerAccounts() {
