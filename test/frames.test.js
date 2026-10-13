@@ -150,6 +150,13 @@ test("frame settings: defaults per account, validation, pictures and lines", asy
   assert.equal(saved.box_percent, 55); assert.equal(saved.background_preset, "red");
   assert.equal(saved.show_username, false); assert.equal(saved.frame_by_default, false);
   assert.deepEqual(saved.title_lines, ["Pehli line", "Doosri line"]);
+  assert.equal(saved.default_caption, "");
+  const caption = "Follow karo 🙏 #reels #sad";
+  assert.equal((await put(first, { default_caption: caption })).data.frame.default_caption, caption);
+  assert.equal((await put(first, { box_percent: 60 })).data.frame.default_caption, caption, "saving the look keeps the caption");
+  assert.equal((await h.request(`/api/accounts/${second}/frame`, { cookie })).data.frame.default_caption, "", "each account has its own caption");
+  assert.equal((await put(first, { default_caption: "x".repeat(2201) })).status, 400);
+  assert.equal((await put(first, { default_caption: 5 })).status, 400);
 
   const image = (kind, body, type = "image/png", method = "PUT") => h.requestRaw(`/api/accounts/${first}/frame/${kind}`, { method, cookie, body, headers: { "content-type": type } });
   assert.equal((await image("art", Buffer.from("<svg/>"), "image/png")).data.error, "invalid_frame_image");

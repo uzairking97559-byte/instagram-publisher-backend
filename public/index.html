@@ -102,6 +102,10 @@
               <p class="hint">Link Meta ko bina login ke khulna chahiye.</p>
             </div>
             <label for="caption">Caption <span id="caption-count" class="muted">0 / 2200</span></label><textarea id="caption" rows="4" placeholder="What would you like to share?"></textarea>
+            <div id="caption-default" class="caption-default" hidden>
+              <p id="caption-default-note" class="hint"></p>
+              <div class="frame-buttons"><button id="caption-save-default" class="quiet" type="button" hidden>Ise default caption banao</button><button id="caption-use-default" class="quiet" type="button" hidden>Default caption wapas lao</button></div>
+            </div>
             <label class="check"><input id="confirm-publish" type="checkbox" required><span id="confirm-label">Maine account aur sab reels check ki hain. Is caption ke saath batch schedule karo.</span></label>
             <button id="publish-button" class="primary" type="submit">Upload aur schedule batch <span aria-hidden="true">↗</span></button>
             <p id="publish-progress" class="hint" role="status"></p>

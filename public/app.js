@@ -57,6 +57,7 @@ const FRAME_COLOURS = { purple: "Purple", red: "Red", blue: "Blue", green: "Gree
 const frameSettings = new Map();
 const frameEditors = new Map();
 let frameTouched = false;
+let captionTouched = false;
 let accounts = [];
 let jobs = [];
 let progress = [];
@@ -333,7 +334,7 @@ function accountCard(account) {
     card.append(element("p", "Is account ki authorization khatam ho gayi. Neeche “Naya account connect karo” se isi account se dobara login karo.", "account-warning"));
   }
   addAccountProgress(card, account);
-  card.append(frameEditor(account));
+  card.append(captionEditor(account), frameEditor(account));
   const actions = element("div", undefined, "account-actions");
   const post = element("button", "Post banao", "quiet strong");
   post.type = "button"; post.disabled = account.needs_reconnect;
@@ -520,14 +521,75 @@ function buildFrameForm(body, account, settings) {
   showPreview();
 }
 // The "Frame lagao" switch starts as the account's own default.
+// The account's saved caption, editable on its card. Built once per account
+// so the 30-second refresh does not drop unsaved typing.
+const captionEditors = new Map();
+function captionEditor(account) {
+  const id = account.connection_id;
+  if (captionEditors.has(id)) return captionEditors.get(id).details;
+  const details = element("details", undefined, "frame-settings");
+  details.append(element("summary", "Default caption · har batch mein apne aap"));
+  const form = element("div", undefined, "frame-form");
+  const text = document.createElement("textarea");
+  text.rows = 5; text.maxLength = 4400; text.id = `default-caption-${id}`;
+  text.placeholder = "Jo caption is account ki har Reel pe lagana hai, yahan likho. Hashtags bhi.";
+  const label = element("label", "Is account ka caption"); label.htmlFor = text.id;
+  const count = element("span", "0 / 2200", "muted"); label.append(count);
+  const save = element("button", "Save caption", "quiet strong"); save.type = "button";
+  const note = element("p", "Create post mein ye account chunte hi caption box mein ye aa jayega. Kisi batch ke liye wahan badal sakte ho; default tab tak wahi rahega jab tak yahan save na karo.", "hint");
+  const buttons = element("div", undefined, "frame-buttons"); buttons.append(save);
+  form.append(label, text, buttons, note);
+  details.append(form);
+  const showCount = () => { count.textContent = `${[...text.value].length} / 2200`; };
+  text.addEventListener("input", showCount);
+  let loaded = false;
+  const load = () => loadFrameSettings(id, true).then((settings) => { text.value = settings.default_caption || ""; showCount(); loaded = true; })
+    .catch((error) => { note.textContent = messages[error?.code] || "Caption load nahi hua. Dobara kholo."; });
+  details.addEventListener("toggle", () => { if (details.open && !loaded) void load(); });
+  save.addEventListener("click", async () => {
+    if ([...text.value].length > 2200) { notice("Caption 2200 characters se chhota rakho.", true); return; }
+    save.disabled = true;
+    try {
+      const { frame } = await api(`/api/accounts/${encodeURIComponent(id)}/frame`, { method: "PUT", body: JSON.stringify({ default_caption: text.value }) });
+      frameSettings.set(id, frame);
+      notice(`@${accountName(account)} ka default caption save ho gaya.`);
+      if ($("account").value === id) { if (!captionTouched) setCaption(frame.default_caption); updateCaptionDefault(frame); }
+    } catch (error) { explain(error); }
+    finally { save.disabled = false; }
+  });
+  captionEditors.set(id, { details, reload: () => { loaded = false; if (details.open) void load(); } });
+  return details;
+}
+function refreshCaptionEditor(id) { captionEditors.get(id)?.reload(); }
+// The "Frame lagao" switch and the caption start as the account's own
+// defaults, until the owner changes them for this batch.
 async function syncFrameChoice() {
   const id = $("account").value;
-  if (!id || frameTouched) { updateFrameExtra(); return; }
+  updateCaptionDefault(null);
+  if (!id || (frameTouched && captionTouched)) { updateFrameExtra(); return; }
   try {
     const settings = await loadFrameSettings(id);
-    if ($("account").value === id && !frameTouched) $("frame-enabled").checked = settings.frame_by_default;
+    if ($("account").value === id) {
+      if (!frameTouched) $("frame-enabled").checked = settings.frame_by_default;
+      if (!captionTouched) setCaption(settings.default_caption || "");
+      updateCaptionDefault(settings);
+    }
   } catch { /* keep the current choice */ }
   updateFrameExtra();
+}
+function setCaption(text) {
+  $("caption").value = text;
+  $("caption").dispatchEvent(new Event("input"));
+  captionTouched = false;
+}
+function updateCaptionDefault(settings) {
+  const saved = settings?.default_caption || "";
+  const same = Boolean(settings) && $("caption").value === saved;
+  $("caption-default").hidden = !settings;
+  $("caption-default-note").textContent = !settings ? "" : !saved ? "Is account ka koi default caption nahi hai."
+    : same ? "Ye is account ka default caption hai." : "Caption badla hai. Sirf is batch pe lagega, jab tak default save na karo.";
+  $("caption-save-default").hidden = !settings || same;
+  $("caption-use-default").hidden = !settings || !saved || same;
 }
 function updateFrameExtra() {
   $("frame-extra").hidden = !$("frame-enabled").checked;
@@ -547,7 +609,7 @@ function renderComposerAccounts() {
   const before = select.dataset.account || "";
   select.value = busy && busyAccount ? busyAccount : usable ? selectedAccount : "";
   select.disabled = busy;
-  if (select.value !== before) { select.dataset.account = select.value; frameTouched = false; void syncFrameChoice(); }
+  if (select.value !== before) { select.dataset.account = select.value; frameTouched = false; captionTouched = false; void syncFrameChoice(); }
   $("publish-button").disabled = busy || !accounts.some((account) => !account.needs_reconnect);
 }
 function summarizeBatch(group, totalCount) {
@@ -910,7 +972,7 @@ $("logout").addEventListener("click", async () => {
     for (const timer of timers.values()) clearTimeout(timer); timers.clear();
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
-    frameSettings.clear(); frameEditors.clear(); renderAccounts(); renderJobs();
+    frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -931,12 +993,35 @@ window.addEventListener("hashchange", () => {
   const view = location.hash.slice(1);
   if (VIEWS.includes(view) && !$("workspace").hidden) showView(view);
 });
-$("caption").addEventListener("input", () => {
+$("caption").addEventListener("input", (event) => {
+  if (event.isTrusted) {
+    captionTouched = true;
+    const id = $("account").value;
+    if (id && frameSettings.has(id)) updateCaptionDefault(frameSettings.get(id));
+  }
   const length = [...$("caption").value].length;
   $("caption-count").textContent = `${length} / 2200`;
   $("caption").setCustomValidity(length > 2200 ? "Caption 2200 characters se chhota rakho." : "");
 });
 $("upload-mode").addEventListener("change", updatePublishMode);
+$("caption-use-default").addEventListener("click", () => {
+  const settings = frameSettings.get($("account").value);
+  if (!settings) return;
+  setCaption(settings.default_caption || ""); updateCaptionDefault(settings);
+});
+$("caption-save-default").addEventListener("click", async () => {
+  const id = $("account").value;
+  if (!id) return;
+  const button = $("caption-save-default"); button.disabled = true;
+  try {
+    const { frame } = await api(`/api/accounts/${encodeURIComponent(id)}/frame`, { method: "PUT", body: JSON.stringify({ default_caption: $("caption").value }) });
+    frameSettings.set(id, frame); captionTouched = false; updateCaptionDefault(frame);
+    const account = accounts.find((item) => item.connection_id === id);
+    notice(`${account ? `@${accountName(account)}` : "Account"} ka default caption save ho gaya. Agli baar ye apne aap lagega.`);
+    refreshCaptionEditor(id);
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
 $("frame-enabled").addEventListener("change", () => { frameTouched = true; updateFrameExtra(); });
 $("reel-files").addEventListener("change", updateFileSummary);
 updatePublishMode();
@@ -982,7 +1067,7 @@ $("publish-form").addEventListener("submit", async (event) => {
       clearBatchAttempt();
       $("publish-progress").textContent = "Batch queue mein save hai. Pehli Reel process hogi; baaki chune hue gap par. Ab phone band kar sakte ho—service schedule ko background mein process karegi.";
       $("publish-form").reset(); updateFileSummary(); updatePublishMode();
-      frameTouched = false; void syncFrameChoice();
+      frameTouched = false; captionTouched = false; void syncFrameChoice();
       notice("Batch queue mein save ho gayi. Pehli Reel abhi process hogi, baaki chune hue gap par. Ab phone band kar sakte ho.");
       selectAccount(accountId); showView("activity");
       await refresh();
