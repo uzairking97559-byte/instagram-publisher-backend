@@ -13,10 +13,11 @@ test("top line: emoji and other scripts are removed, long lines wrap into two ba
   assert.equal(frame.cleanTitle("आप कौन"), "");
   assert.equal(frame.cleanTitle(null), "");
   assert.deepEqual(frame.wrapTitle("Perfect line..!!"), ["Perfect line..!!"]);
-  assert.deepEqual(frame.wrapTitle("Waqt sab sikha deta hai dost"), ["Waqt sab sikha", "deta hai dost"]);
+  assert.deepEqual(frame.wrapTitle("Waqt sab sikha deta hai dost"), ["Waqt sab sikha deta hai dost"], "always one line");
+  assert.ok(frame.titleFontSize(["x".repeat(60)]) * 0.55 * 60 <= 1080, "a long line still fits the width");
   assert.ok(frame.wrapTitle("x".repeat(200)).join("").length <= frame.MAX_TITLE_CHARS);
   assert.ok(frame.titleFontSize(["Kadwa sach..!!"]) <= 86);
-  assert.ok(frame.titleFontSize(["a very long line of text here", "and another one"]) >= 46);
+  assert.ok(frame.titleFontSize(["a very long line of text here"]) >= 32);
 });
 
 test("each account gets its own background colour; usernames are cleaned", () => {
@@ -35,6 +36,7 @@ test("box size follows the chosen percentage and stays centred", () => {
   assert.equal(sixty.box, 648); assert.equal(sixty.x, 216); assert.equal(sixty.y, 330);
   assert.equal(frame.layout(999).percent, frame.DEFAULT_BOX_PERCENT);
   assert.equal(frame.layout(80).box, 864);
+  assert.equal(frame.layout(25).box, 270);
 });
 
 test("typed text never reaches the ffmpeg filter graph", () => {
