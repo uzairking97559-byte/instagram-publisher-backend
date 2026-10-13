@@ -540,3 +540,22 @@ footer a { color: var(--accent); }
   .connect-options { grid-template-columns: 1fr 1fr; }
   .panel { padding: 24px; }
 }
+
+/* Reel frame: choice in Create post, look settings on the account card */
+.frame-choice { margin-top: 18px; padding: 2px 14px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.frame-choice .check { margin: 14px 0 0; }
+.frame-choice label:not(.check) { margin-top: 14px; }
+.frame-settings { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.frame-settings summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.frame-form label { margin: 14px 0 6px; font-size: 12.5px; }
+.frame-form .check { margin: 14px 0 0; }
+.frame-form textarea { min-height: 120px; font-size: 13px; }
+.frame-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.frame-preview { display: block; width: 100%; max-width: 270px; aspect-ratio: 9 / 16; margin: 12px auto 4px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--sunken); object-fit: cover; }
+.frame-preview-status { text-align: center; min-height: 1.4em; }
+.frame-image-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.frame-image-row input[type=file] { flex: 1 1 180px; min-width: 0; }
+.frame-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.frame-state { margin: 2px 0 8px; font-size: 12.5px; color: var(--muted); }
+.frame-state.bad { color: var(--warn); }
+@media (max-width: 420px) { .frame-fields { grid-template-columns: 1fr; } }

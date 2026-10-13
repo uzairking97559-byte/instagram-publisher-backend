@@ -61,6 +61,14 @@ A timeout, invalid success response or lost database write can leave an `unknown
 
 Disconnect removes that saved connection/token, retains publishing history, and cancels that account's unfinished batches (their videos are then deleted); a Reel already being published still finishes. It does not cancel a Meta API request already in flight or revoke the app permission at Meta. Remove permission in Meta account settings when full revocation is required.
 
+## Reel frame
+
+Bulk mode has a **Frame lagao** switch. A framed Reel is shown in a centred square box (50–80% of the width, 60% by default) on a textured background, with a line of text above it, the account's username below it and a picture at the bottom. Each account has its own look under Accounts → account → **Frame ka look**: a background colour (each account gets a different one by default) or an uploaded photo, the box size, the bottom picture (the bundled default, an uploaded one, or none), whether to show the username, whether the switch starts on, and a list of top lines. A batch can give its own top line; otherwise one is picked at random from the account's lines, or from the built-in Hinglish lines. The bundled Lora font draws Latin text only, so emoji and other scripts are removed from the line.
+
+Uploading is unchanged. A background worker in the web process frames queued Reels one at a time, in the order they are due, with ffmpeg (`lib/frame.js`), and replaces the stored video with the 1080×1920 H.264 result. The scheduler does not start a framed Reel until its frame is done. A render that fails is tried once more; after that, or if ffmpeg is missing, the original video is posted and Activity says so. A render cut off by a restart starts again. Rendering a 30-second Reel takes roughly a minute on half a CPU and about 180 MB of memory (encoder settings in `lib/frame.js`), so one render at a time fits a 512 MB instance.
+
+`npm install` runs `scripts/install-ffmpeg.js`, which downloads a pinned static ffmpeg 6.0 build for linux-x64 into `bin/` and checks its SHA-256. If it cannot (another platform, no network), framing is unavailable but nothing else is affected. Set `FFMPEG_PATH` to use an installed ffmpeg, or `SKIP_FFMPEG_DOWNLOAD=1` to skip the download. Fonts are Lora (SIL Open Font License, `assets/frame/fonts/OFL.txt`).
+
 ## API
 
 All account/job routes require the owner session cookie. All writes require an exact canonical `Origin` and host. Public API keys, arbitrary access-token request bodies and anonymous publishing are not supported.
@@ -79,7 +87,10 @@ All account/job routes require the owner session cookie. All writes require an e
 | `POST /api/accounts/:connectionId/refresh` | Refresh if eligible; report reconnect requirement |
 | `POST /api/publish/image`, `POST /api/publish/reels` | Create idempotent publishing receipt/container |
 | `POST /api/assets` | Upload one private MP4/MOV file (up to 50 MB) |
-| `POST /api/batches` | Queue 1–20 uploaded files with a shared caption and a 5/10/15/20/30/45/60-minute interval |
+| `POST /api/batches` | Queue 1–20 uploaded files with a shared caption and a 5/10/15/20/30/45/60-minute interval; optional `frame: true` and `frame_title` |
+| `GET`/`PUT /api/accounts/:connectionId/frame` | Read or change an account's frame look |
+| `PUT`/`DELETE /api/accounts/:connectionId/frame/background`, `.../frame/art` | Upload (JPEG/PNG/WEBP, up to 5 MB) or remove the account's background or bottom picture |
+| `GET /api/accounts/:connectionId/frame/preview` | PNG preview of the account's look |
 | `POST /api/batches/:id/resume` | Continue after a definitively failed Reel |
 | `POST /api/batches/:id/cancel` | Cancel every Reel of a batch not yet sent for publishing |
 | `GET /api/storage` | Video storage used, free and allowed |
