@@ -167,3 +167,17 @@ ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_started_at TIMESTAMPTZ
 ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_title TEXT;
 ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_error TEXT;
 CREATE INDEX IF NOT EXISTS publisher_jobs_frame_idx ON publisher_jobs(frame_status, scheduled_at) WHERE frame_status IN ('pending', 'rendering');
+-- Large uploads arrive in parts (lib/publishing.js), stored one row per part
+-- so neither the upload nor Meta's ranged reads ever load the whole video.
+-- An asset stored this way has data NULL and part_bytes set; until every part
+-- has arrived upload_complete is FALSE and no batch or Meta request can use it.
+ALTER TABLE publisher_media_assets ALTER COLUMN data DROP NOT NULL;
+ALTER TABLE publisher_media_assets ADD COLUMN IF NOT EXISTS part_bytes INTEGER;
+ALTER TABLE publisher_media_assets ADD COLUMN IF NOT EXISTS upload_complete BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE TABLE IF NOT EXISTS publisher_media_parts (
+  asset_id UUID NOT NULL REFERENCES publisher_media_assets(id) ON DELETE CASCADE,
+  part INTEGER NOT NULL CHECK (part >= 0),
+  data BYTEA NOT NULL,
+  PRIMARY KEY (asset_id, part)
+);
+ALTER TABLE publisher_media_parts ALTER COLUMN data SET STORAGE EXTERNAL;
