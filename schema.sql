@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS publisher_frame_settings (
   background_image BYTEA,
   art_mode TEXT NOT NULL DEFAULT 'default' CHECK (art_mode IN ('default', 'custom', 'none')),
   art_image BYTEA,
-  box_percent INTEGER NOT NULL DEFAULT 60 CHECK (box_percent IN (50, 55, 60, 65, 70, 75, 80)),
+  box_percent INTEGER NOT NULL DEFAULT 60 CHECK (box_percent IN (25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80)),
   show_username BOOLEAN NOT NULL DEFAULT TRUE,
   title_lines TEXT[] NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -181,3 +181,7 @@ CREATE TABLE IF NOT EXISTS publisher_media_parts (
   PRIMARY KEY (asset_id, part)
 );
 ALTER TABLE publisher_media_parts ALTER COLUMN data SET STORAGE EXTERNAL;
+-- Box sizes from 25% (keep in sync with BOX_PERCENTS in lib/frame.js).
+ALTER TABLE publisher_frame_settings DROP CONSTRAINT IF EXISTS publisher_frame_settings_box_percent_check;
+ALTER TABLE publisher_frame_settings ADD CONSTRAINT publisher_frame_settings_box_percent_check
+  CHECK (box_percent IN (25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80));
