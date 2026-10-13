@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS publisher_frame_settings (
   title_lines TEXT[] NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- The caption Create post fills in for this account (the owner can still edit it per batch).
+ALTER TABLE publisher_frame_settings ADD COLUMN IF NOT EXISTS default_caption TEXT NOT NULL DEFAULT '';
 ALTER TABLE publisher_batches ADD COLUMN IF NOT EXISTS frame BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE publisher_batches ADD COLUMN IF NOT EXISTS frame_title TEXT;
 -- A framed Reel waits for its video to be rendered (pending -> rendering ->
