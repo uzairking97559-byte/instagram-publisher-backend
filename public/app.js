@@ -29,8 +29,11 @@ const messages = {
   invalid_post: "Account, HTTPS media link aur caption (maximum 2200 characters) check karo.",
   invalid_upload: "Video file ko dobara chuno aur upload try karo.",
   invalid_video_format: "MP4 ya MOV video select karo.",
-  upload_too_large: "Har video 50 MB se chhoti honi chahiye.",
-  request_too_large: "Har video 50 MB se chhoti honi chahiye.",
+  upload_too_large: "Har video 250 MB se chhoti honi chahiye.",
+  request_too_large: "Video ka ek hissa server tak nahi pahuncha. Dobara try karo.",
+  upload_incomplete: "Video ke saare hisse upload nahi hue. Same files dobara chuno, jo hissa reh gaya wahi jayega.",
+  upload_not_found: "Ye upload expire ho gaya (3 ghante). Videos dobara chuno.",
+  invalid_upload_part: "Video ka ek hissa kharab pahuncha. Same files dobara chuno.",
   upload_storage_full: "Storage limit bhar gayi. Queue ki Reels post hone do (har Reel post hote hi uski jagah khaali hoti hai), ya kam videos chuno.",
   invalid_batch: "1–20 videos, account, caption aur 5 minute se 1 ghante tak ka gap select karo.",
   invalid_progress_settings: "Target 1–10,000 aur pehle se ki ginti 0 se target ke beech rakho.",
@@ -876,7 +879,7 @@ function storageText() {
 }
 function updateFileSummary() {
   const files = selectedFiles();
-  if (!files.length) { $("file-summary").textContent = `1–20 MP4/MOV files. Har file 50 MB tak. ${storageText()}`.trim(); return; }
+  if (!files.length) { $("file-summary").textContent = `1–20 MP4/MOV files. Har file 250 MB tak. ${storageText()}`.trim(); return; }
   const total = files.reduce((sum, file) => sum + file.size, 0);
   const room = storage ? ` · ${formatBytes(storage.free_bytes)} khaali` : "";
   $("file-summary").textContent = `${files.length} videos · total ${formatBytes(total)}${room} · ${files.map((file) => file.name).join(", ")}`;
@@ -893,7 +896,45 @@ function updatePublishMode() {
     : "Maine account aur content check kiya hai. Is post ko ab publish karna hai.";
   $("publish-button").firstChild.textContent = batch ? "Upload aur schedule batch " : "Publish post ";
 }
+// Videos over 45 MB go in 4 MB parts, so a big file never sits in the
+// server's memory and a dropped connection only resends the missing parts.
+async function uploadLargeAsset(file, attempt) {
+  const key = await requestKey(["asset-parts", file.name, file.size, file.lastModified], attempt);
+  const { upload } = await api("/api/assets/uploads", { method: "POST", headers: { "Idempotency-Key": key },
+    body: JSON.stringify({ file_name: file.name, size: file.size }) });
+  if (upload.complete) return upload;
+  const partBytes = upload.part_bytes, count = Math.ceil(file.size / partBytes);
+  const received = new Set(upload.parts_received);
+  for (let part = 0; part < count; part++) {
+    if (received.has(part)) continue;
+    const body = file.slice(part * partBytes, Math.min(file.size, (part + 1) * partBytes));
+    for (let retry = 0; ; retry++) {
+      $("publish-progress").textContent = `${file.name}: ${Math.floor((part / count) * 100)}% upload hua… page band mat karo.`;
+      let response;
+      try {
+        response = await fetch(`/api/assets/uploads/${encodeURIComponent(upload.asset_id)}/parts/${part}`, { method: "PUT", credentials: "same-origin",
+          headers: { "Content-Type": "application/octet-stream" }, body, signal: AbortSignal.timeout(120000) });
+      } catch (error) {
+        if (retry < 5) { await new Promise((resolve) => setTimeout(resolve, [3000, 6000, 10000, 15000, 20000][retry])); continue; }
+        throw { code: error?.name === "TimeoutError" ? "upload_timeout" : "upload_network_unreachable" };
+      }
+      if (response.ok) break;
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401 && data.error === "sign_in_required") showSignedOut();
+      // Resending a part replaces it, so retrying after a server hiccup is safe.
+      if ((response.status >= 500 || response.status === 429) && retry < 5) {
+        await new Promise((resolve) => setTimeout(resolve, [3000, 6000, 10000, 15000, 20000][retry]));
+        continue;
+      }
+      throw { code: data.error || "temporarily_unavailable" };
+    }
+  }
+  $("publish-progress").textContent = `${file.name}: 100% upload hua, check ho raha hai…`;
+  const { asset } = await api(`/api/assets/uploads/${encodeURIComponent(upload.asset_id)}/complete`, { method: "POST", body: "{}" });
+  return asset;
+}
 async function uploadAsset(file, attempt) {
+  if (file.size > 45 * 1024 * 1024) return uploadLargeAsset(file, attempt);
   const key = await requestKey(["asset", file.name, file.size, file.lastModified], attempt);
   const maxRecoveryChecks = 31;
   async function waitForDatabaseRecovery() {
@@ -1037,8 +1078,8 @@ $("publish-form").addEventListener("submit", async (event) => {
     if ($("upload-mode").value === "batch") {
       const files = selectedFiles();
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (files.length < 1 || files.length > 20 || files.some((file) => file.size > 50 * 1024 * 1024)) {
-        throw { code: files.some((file) => file.size > 50 * 1024 * 1024) ? "upload_too_large" : "invalid_batch" };
+      if (files.length < 1 || files.length > 20 || files.some((file) => file.size > 250 * 1024 * 1024)) {
+        throw { code: files.some((file) => file.size > 250 * 1024 * 1024) ? "upload_too_large" : "invalid_batch" };
       }
       // Check free space first so a too-large selection uploads nothing.
       // Uploads not yet in a batch are usually this same attempt's earlier
