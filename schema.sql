@@ -137,3 +137,31 @@ CREATE INDEX IF NOT EXISTS publisher_batches_due_idx ON publisher_batches(status
 CREATE INDEX IF NOT EXISTS publisher_media_assets_expiry_idx ON publisher_media_assets(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS publisher_jobs_asset_id_idx ON publisher_jobs(asset_id) WHERE asset_id IS NOT NULL;
 
+-- Reel frame (lib/frame.js): per-account look, used when a batch asks for it.
+-- Uploaded background/bottom pictures are small images (5 MB at most).
+CREATE TABLE IF NOT EXISTS publisher_frame_settings (
+  account_row_id BIGINT PRIMARY KEY REFERENCES publisher_accounts(id) ON DELETE CASCADE,
+  frame_by_default BOOLEAN NOT NULL DEFAULT TRUE,
+  background_preset TEXT,
+  background_image BYTEA,
+  art_mode TEXT NOT NULL DEFAULT 'default' CHECK (art_mode IN ('default', 'custom', 'none')),
+  art_image BYTEA,
+  box_percent INTEGER NOT NULL DEFAULT 60 CHECK (box_percent IN (50, 55, 60, 65, 70, 75, 80)),
+  show_username BOOLEAN NOT NULL DEFAULT TRUE,
+  title_lines TEXT[] NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE publisher_batches ADD COLUMN IF NOT EXISTS frame BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE publisher_batches ADD COLUMN IF NOT EXISTS frame_title TEXT;
+-- A framed Reel waits for its video to be rendered (pending -> rendering ->
+-- done). If rendering fails, the original video is posted (failed).
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_status TEXT;
+ALTER TABLE publisher_jobs DROP CONSTRAINT IF EXISTS publisher_jobs_frame_status_check;
+ALTER TABLE publisher_jobs ADD CONSTRAINT publisher_jobs_frame_status_check
+  CHECK (frame_status IS NULL OR frame_status IN ('pending', 'rendering', 'done', 'failed'));
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_claim UUID;
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_started_at TIMESTAMPTZ;
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_title TEXT;
+ALTER TABLE publisher_jobs ADD COLUMN IF NOT EXISTS frame_error TEXT;
+CREATE INDEX IF NOT EXISTS publisher_jobs_frame_idx ON publisher_jobs(frame_status, scheduled_at) WHERE frame_status IN ('pending', 'rendering');

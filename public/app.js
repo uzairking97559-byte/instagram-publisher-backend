@@ -46,8 +46,17 @@ const messages = {
   temporarily_unavailable: "Server se response nahi mila. Activity check karo; upload ya batch ka status clear hone tak use dobara submit mat karo.",
   upload_network_unreachable: "Phone se website ka connection toot gaya. Upload confirm nahi hua; Activity check karo, batch pending na ho tabhi same files retry karo.",
   upload_recovery_timeout: "5 minute tak service ready nahi hui. Activity check karo; batch entry na ho to hi same files retry karo.",
-  upload_timeout: "Video upload ka response time out hua. Activity check karo; batch entry na ho to hi same files retry karo."
+  upload_timeout: "Video upload ka response time out hua. Activity check karo; batch entry na ho to hi same files retry karo.",
+  invalid_frame_settings: "Frame ki settings sahi nahi hain. Page refresh karke dobara save karo.",
+  frame_art_missing: "Pehle apni photo upload karo, phir “Apni photo” chuno.",
+  invalid_frame_image: "JPG, PNG ya WEBP photo chuno.",
+  frame_image_too_large: "Photo 5 MB se chhoti honi chahiye.",
+  frame_unavailable: "Preview abhi nahi ban saka. Thodi der baad dobara try karo."
 };
+const FRAME_COLOURS = { purple: "Purple", red: "Red", blue: "Blue", green: "Green", teal: "Teal", brown: "Brown" };
+const frameSettings = new Map();
+const frameEditors = new Map();
+let frameTouched = false;
 let accounts = [];
 let jobs = [];
 let progress = [];
@@ -324,6 +333,7 @@ function accountCard(account) {
     card.append(element("p", "Is account ki authorization khatam ho gayi. Neeche “Naya account connect karo” se isi account se dobara login karo.", "account-warning"));
   }
   addAccountProgress(card, account);
+  card.append(frameEditor(account));
   const actions = element("div", undefined, "account-actions");
   const post = element("button", "Post banao", "quiet strong");
   post.type = "button"; post.disabled = account.needs_reconnect;
@@ -362,6 +372,166 @@ function profileLink(username) {
   link.append(icon, element("span", "Instagram pe profile kholo"), arrow);
   return link;
 }
+async function loadFrameSettings(id, fresh = false) {
+  if (!fresh && frameSettings.has(id)) return frameSettings.get(id);
+  const { frame } = await api(`/api/accounts/${encodeURIComponent(id)}/frame`);
+  frameSettings.set(id, frame);
+  return frame;
+}
+// Phone photos are shrunk before upload: backgrounds to a 1080 px wide JPEG,
+// bottom pictures to a 1000 px wide PNG so a transparent background stays.
+async function shrinkImage(file, kind) {
+  const bitmap = await createImageBitmap(file);
+  const maxWidth = kind === "art" ? 1000 : 1080, maxHeight = kind === "art" ? 1500 : 1920;
+  const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const type = kind === "art" ? "image/png" : "image/jpeg";
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject({ code: "invalid_frame_image" }), type, 0.88));
+}
+// The account's frame look. Built once per account and reused, so the
+// 30-second refresh that redraws the account card keeps unsaved edits.
+function frameEditor(account) {
+  const id = account.connection_id;
+  if (frameEditors.has(id)) return frameEditors.get(id);
+  const details = element("details", undefined, "frame-settings");
+  details.append(element("summary", "Frame ka look · background, line, box size"));
+  const body = element("div", undefined, "frame-form");
+  body.append(element("p", "Load ho raha hai…", "hint"));
+  details.append(body);
+  let built = false;
+  details.addEventListener("toggle", () => {
+    if (!details.open || built) return;
+    built = true;
+    loadFrameSettings(id, true).then((settings) => buildFrameForm(body, account, settings))
+      .catch((error) => { built = false; body.replaceChildren(element("p", messages[error?.code] || "Settings load nahi hui. Dobara kholo.", "hint")); });
+  });
+  frameEditors.set(id, details);
+  return details;
+}
+function frameSelect(options, value) {
+  const select = document.createElement("select");
+  for (const [optionValue, label] of options) {
+    const option = element("option", label); option.value = String(optionValue); select.append(option);
+  }
+  select.value = String(value);
+  return select;
+}
+function frameCheck(text, checked) {
+  const label = element("label", undefined, "check");
+  const input = document.createElement("input"); input.type = "checkbox"; input.checked = checked;
+  label.append(input, element("span", text));
+  return { label, input };
+}
+function buildFrameForm(body, account, settings) {
+  const id = account.connection_id;
+  const path = `/api/accounts/${encodeURIComponent(id)}/frame`;
+  body.replaceChildren();
+  const preview = document.createElement("img");
+  preview.className = "frame-preview"; preview.alt = `@${accountName(account)} ke frame ka preview`;
+  const previewStatus = element("p", "", "hint frame-preview-status");
+  const showPreview = () => {
+    previewStatus.textContent = "Preview ban raha hai…";
+    preview.src = `${path}/preview?v=${Date.now()}`;
+  };
+  preview.addEventListener("load", () => { previewStatus.textContent = "Grey box mein video aayegi. Upar ki line har Reel pe badal sakti hai."; });
+  preview.addEventListener("error", () => { previewStatus.textContent = messages.frame_unavailable; });
+  body.append(preview, previewStatus);
+
+  const colour = frameSelect(settings.options.background_presets.map((name) => [name, FRAME_COLOURS[name] || name]), settings.background_preset);
+  const box = frameSelect(settings.options.box_percents.map((value) => [value, `${value}% chauda`]), settings.box_percent);
+  const fields = element("div", undefined, "frame-fields");
+  const colourLabel = element("label", "Background rang"); colourLabel.append(colour);
+  const boxLabel = element("label", "Video box ka size"); boxLabel.append(box);
+  fields.append(colourLabel, boxLabel);
+  body.append(fields);
+
+  function imageRow(kind, title, hasImage) {
+    const wrap = element("div");
+    wrap.append(element("label", title));
+    const row = element("div", undefined, "frame-image-row");
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/jpeg,image/png,image/webp";
+    const remove = element("button", "Hatao", "quiet"); remove.type = "button"; remove.hidden = !hasImage;
+    row.append(input, remove);
+    wrap.append(row);
+    const note = element("p", hasImage ? "Apni photo lagi hai." : "", "hint");
+    wrap.append(note);
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      input.disabled = true; note.textContent = "Photo upload ho rahi hai…";
+      try {
+        const blob = await shrinkImage(file, kind);
+        const { frame } = await api(`${path}/${kind}`, { method: "PUT", headers: { "Content-Type": blob.type }, body: blob });
+        frameSettings.set(id, frame); buildFrameForm(body, account, frame);
+      } catch (error) { explain(error); note.textContent = ""; input.disabled = false; input.value = ""; }
+    });
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      try {
+        const { frame } = await api(`${path}/${kind}`, { method: "DELETE" });
+        frameSettings.set(id, frame); buildFrameForm(body, account, frame);
+      } catch (error) { explain(error); remove.disabled = false; }
+    });
+    return wrap;
+  }
+  body.append(imageRow("background", "Apni background photo (optional, rang ki jagah lagegi)", settings.custom_background));
+
+  const art = frameSelect([["default", "Phoolon wali ladki (default)"], ["custom", "Apni photo"], ["none", "Kuch nahi"]], settings.art_mode);
+  art.options[1].disabled = !settings.custom_art;
+  const artLabel = element("label", "Neeche ki photo"); artLabel.append(art);
+  body.append(artLabel);
+  body.append(imageRow("art", "Apni neeche wali photo (PNG bina background ke sabse achhi lagti hai)", settings.custom_art));
+
+  const username = frameCheck("Box ke neeche account ka username dikhao", settings.show_username);
+  const byDefault = frameCheck("Is account ki nayi batch mein “Frame lagao” pehle se ON rahe", settings.frame_by_default);
+  body.append(username.label, byDefault.label);
+
+  const lines = document.createElement("textarea");
+  lines.id = `frame-lines-${id}`;
+  lines.rows = 6; lines.value = settings.title_lines.join("\n");
+  lines.placeholder = settings.options.default_title_lines.slice(0, 6).join("\n");
+  const linesLabel = element("label", "Upar ki lines · ek row mein ek line"); linesLabel.htmlFor = lines.id;
+  body.append(linesLabel, lines,
+    element("p", `Har Reel pe in mein se koi ek line lagegi. Khaali chhodo to website ki apni ${settings.options.default_title_lines.length} lines use hongi. Hinglish likho; emoji aur Hindi lipi nahi dikhegi.`, "hint"));
+
+  const buttons = element("div", undefined, "frame-buttons");
+  const save = element("button", "Save look", "quiet strong"); save.type = "button";
+  const again = element("button", "Naya preview", "quiet"); again.type = "button";
+  buttons.append(save, again);
+  body.append(buttons);
+  again.addEventListener("click", showPreview);
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      const { frame } = await api(path, { method: "PUT", body: JSON.stringify({
+        background_preset: colour.value, box_percent: Number(box.value), art_mode: art.value,
+        show_username: username.input.checked, frame_by_default: byDefault.input.checked,
+        title_lines: lines.value.split("\n").map((line) => line.trim()).filter(Boolean)
+      }) });
+      frameSettings.set(id, frame);
+      notice(`@${accountName(account)} ka frame look save ho gaya.`);
+      buildFrameForm(body, account, frame);
+      if ($("account").value === id) void syncFrameChoice();
+    } catch (error) { explain(error); save.disabled = false; }
+  });
+  showPreview();
+}
+// The "Frame lagao" switch starts as the account's own default.
+async function syncFrameChoice() {
+  const id = $("account").value;
+  if (!id || frameTouched) { updateFrameExtra(); return; }
+  try {
+    const settings = await loadFrameSettings(id);
+    if ($("account").value === id && !frameTouched) $("frame-enabled").checked = settings.frame_by_default;
+  } catch { /* keep the current choice */ }
+  updateFrameExtra();
+}
+function updateFrameExtra() {
+  $("frame-extra").hidden = !$("frame-enabled").checked;
+}
 // Create post follows the picked account; with "all" the owner chooses one here.
 function renderComposerAccounts() {
   const select = $("account");
@@ -374,8 +544,10 @@ function renderComposerAccounts() {
   }
   const usable = accounts.some((account) => account.connection_id === selectedAccount && !account.needs_reconnect);
   // While a post is being sent, keep showing the account it is going to.
+  const before = select.dataset.account || "";
   select.value = busy && busyAccount ? busyAccount : usable ? selectedAccount : "";
   select.disabled = busy;
+  if (select.value !== before) { select.dataset.account = select.value; frameTouched = false; void syncFrameChoice(); }
   $("publish-button").disabled = busy || !accounts.some((account) => !account.needs_reconnect);
 }
 function summarizeBatch(group, totalCount) {
@@ -482,6 +654,8 @@ function renderJobs() {
       row.append(element("span", `Reel ${job.batch_position}/${job.batch_count} · ${label}`),
         element("span", names[job.status] || job.status, `badge ${job.status}`));
       details.append(row);
+      const frameText = frameStateText(job);
+      if (frameText) details.append(element("p", frameText, `frame-state${job.frame_status === "failed" ? " bad" : ""}`));
       if (job.status === "queued") details.append(element("p", `Publish target: ${formatWhen(job.scheduled_at)}`));
       addAction(details, job);
     }
@@ -539,6 +713,13 @@ function renderJobs() {
     addAction(card, job);
     $("jobs").append(card);
   }
+}
+function frameStateText(job) {
+  if (!job.frame_status || job.status === "cancelled") return "";
+  if (job.frame_status === "pending") return "Frame: line mein hai, post hone se pehle lagega";
+  if (job.frame_status === "rendering") return "Frame lag raha hai…";
+  if (job.frame_status === "done") return `Frame laga ✓${job.frame_title ? ` · “${job.frame_title}”` : ""}`;
+  return job.status === "queued" ? "Frame nahi lag paya, original video post hogi" : "Frame nahi lag paya, original video post hui";
 }
 function jobsPath(scope) {
   return scope === ALL_ACCOUNTS ? "/api/jobs" : `/api/jobs?connection_id=${encodeURIComponent(scope)}`;
@@ -728,7 +909,8 @@ $("logout").addEventListener("click", async () => {
     await api("/auth/logout", { method: "POST", body: "{}" });
     for (const timer of timers.values()) clearTimeout(timer); timers.clear();
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
-    accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null; renderAccounts(); renderJobs();
+    accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
+    frameSettings.clear(); frameEditors.clear(); renderAccounts(); renderJobs();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -755,6 +937,7 @@ $("caption").addEventListener("input", () => {
   $("caption").setCustomValidity(length > 2200 ? "Caption 2200 characters se chhota rakho." : "");
 });
 $("upload-mode").addEventListener("change", updatePublishMode);
+$("frame-enabled").addEventListener("change", () => { frameTouched = true; updateFrameExtra(); });
 $("reel-files").addEventListener("change", updateFileSummary);
 updatePublishMode();
 $("publish-form").addEventListener("submit", async (event) => {
@@ -791,6 +974,7 @@ $("publish-form").addEventListener("submit", async (event) => {
       }
       const payload = { connection_id: accountId, caption: $("caption").value,
         interval_minutes: Number($("interval-minutes").value), asset_ids: assetIds };
+      if ($("frame-enabled").checked) Object.assign(payload, { frame: true, frame_title: $("frame-title").value.trim().slice(0, 60) });
       const key = await requestKey(["batch", payload], attempt);
       $("publish-progress").textContent = "Batch server par save ho rahi hai… page khula rakho; button dobara mat dabao.";
       await api("/api/batches", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(payload) });
@@ -798,6 +982,7 @@ $("publish-form").addEventListener("submit", async (event) => {
       clearBatchAttempt();
       $("publish-progress").textContent = "Batch queue mein save hai. Pehli Reel process hogi; baaki chune hue gap par. Ab phone band kar sakte ho—service schedule ko background mein process karegi.";
       $("publish-form").reset(); updateFileSummary(); updatePublishMode();
+      frameTouched = false; void syncFrameChoice();
       notice("Batch queue mein save ho gayi. Pehli Reel abhi process hogi, baaki chune hue gap par. Ab phone band kar sakte ho.");
       selectAccount(accountId); showView("activity");
       await refresh();
