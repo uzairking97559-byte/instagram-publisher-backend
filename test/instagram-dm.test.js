@@ -15,7 +15,7 @@ const { createInstagramDriver } = require("../lib/instagram-dm");
 
 const CHROME = process.env.DM_TEST_CHROME;
 const MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views. Interested? Reply YES and I'll share the details!";
-const FAST = { navigation: 15000, profile: 8000, button: 1500, chat: 5000, history: 300, send: 4000, poll: 100 };
+const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, poll: 100 };
 
 function page(body) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<script>${SCRIPT}</script></body></html>`;
@@ -44,7 +44,13 @@ function openChat(user, old) {
   });
   document.body.append(panel);
 }
-for (const button of document.querySelectorAll('[data-open]')) button.addEventListener('click', () => setTimeout(() => openChat(button.dataset.open, window.OLD), 200));
+// LAZY: like Instagram while its code loads, a click does nothing at first.
+// NEVER: the button never opens a chat.
+for (const button of document.querySelectorAll('[data-open]')) {
+  const attach = () => button.addEventListener('click', () => setTimeout(() => openChat(button.dataset.open, window.OLD), 200));
+  if (window.NEVER) continue;
+  if (window.LAZY) setTimeout(attach, 600); else attach();
+}
 for (const button of document.querySelectorAll('[data-dismiss]')) button.addEventListener('click', () => button.closest('[role=dialog]').remove());
 if (window.PRE_OPEN) openChat(window.PRE_OPEN, []);
 `;
@@ -66,6 +72,8 @@ function site(requests) {
     "/blockme/": profile("blockme", { setup: "window.BLOCK_ON_SEND = true;" }),
     "/twopanel/": profile("twopanel", { setup: "window.PRE_OPEN = 'someone_else';" }),
     "/multi/": profile("multi"),
+    "/lazy/": profile("lazy", { setup: "window.LAZY = true;" }),
+    "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
     "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>')
   };
   return http.createServer((req, res) => {
@@ -124,6 +132,13 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   assert.deepEqual(await send("ghost"), { status: "skipped", reason: "not_found" });
   assert.deepEqual(await send("twopanel"), { status: "sent" });
   assert.deepEqual(await send("multi", "Line one here please\nLine two here please"), { status: "sent" });
+  // A first click before the page's code is ready is pressed again.
+  assert.deepEqual(await send("lazy"), { status: "sent" });
+  // A chat that never opens fails with a description of the page for the log.
+  const none = await send("nochat");
+  assert.equal(none.status, "failed");
+  assert.equal(none.reason, "chat_not_opened");
+  assert.match(none.detail, /^path=\/nochat\/ width=1366 editable=0 textbox=0 textarea=0 button=true clicks=3$/);
   assert.deepEqual(await send("blockme"), { status: "blocked", reason: "action_blocked", text: "Try Again Later", attempted: true });
   assert.deepEqual(await send("login"), { status: "blocked", reason: "logged_out", text: null, attempted: false });
   await session.idle();
