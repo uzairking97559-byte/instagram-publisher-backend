@@ -48,6 +48,7 @@ function openChat(user, old) {
 // NEVER: the button never opens a chat.
 for (const button of document.querySelectorAll('[data-open]')) {
   const attach = () => button.addEventListener('click', () => setTimeout(() => openChat(button.dataset.open, window.OLD), 200));
+  if (window.VANISH) setTimeout(() => button.remove(), 50);
   if (window.NEVER) continue;
   if (window.LAZY) setTimeout(attach, 600); else attach();
 }
@@ -74,6 +75,7 @@ function site(requests) {
     "/multi/": profile("multi"),
     "/lazy/": profile("lazy", { setup: "window.LAZY = true;" }),
     "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
+    "/vanish/": profile("vanish", { setup: "window.VANISH = true;" }),
     "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>')
   };
   return http.createServer((req, res) => {
@@ -134,6 +136,8 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   assert.deepEqual(await send("multi", "Line one here please\nLine two here please"), { status: "sent" });
   // A first click before the page's code is ready is pressed again.
   assert.deepEqual(await send("lazy"), { status: "sent" });
+  // A button that disappears as the page loads means no messages: skipped.
+  assert.deepEqual(await send("vanish"), { status: "skipped", reason: "no_message_button" });
   // A chat that never opens fails with a description of the page for the log.
   const none = await send("nochat");
   assert.equal(none.status, "failed");

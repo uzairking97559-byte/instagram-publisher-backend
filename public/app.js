@@ -1211,6 +1211,16 @@ function dmHourSelect(from, to, value) {
   const hours = Array.from({ length: to - from + 1 }, (_, index) => from + index);
   return frameSelect(hours.map((hour) => [hour, hourLabel(hour)]), value);
 }
+const DM_PROXIES = [["in", "India proxy (data paid)"], ["none", "Bina proxy (sasta)"]];
+const DM_PROXY_NOTES = {
+  in: "Instagram ko login India se dikhta hai. Har DM pe Instagram ka page proxy se aata hai, jiska data ka kharcha lagta hai.",
+  none: "Data ka kharcha nahi, sirf browser ka time. Instagram ko login doosre desh se dikhega, isliye wo security check maang sakta hai; tab campaign ruk jayega aur Instagram app mein “It was me” dabana hoga."
+};
+function proxyLabel(proxy) { return proxy === "none" ? "Bina proxy" : proxy === "in" ? "India proxy" : `${proxy.toUpperCase()} proxy`; }
+function dmProxySelect(value) {
+  const options = DM_PROXIES.some(([code]) => code === value) ? DM_PROXIES : [...DM_PROXIES, [value, proxyLabel(value)]];
+  return frameSelect(options, value);
+}
 function fillSelect(target, source) {
   const value = source.value;
   target.replaceChildren(...source.options);
@@ -1264,7 +1274,7 @@ function dmCard(campaign) {
   const head = element("div", undefined, "job-head");
   head.append(element("strong", campaign.name), element("span", DM_BADGES[campaign.status] || campaign.status, `badge ${campaign.status}`));
   const who = campaign.profile_name || `Profile ${campaign.profile_id.slice(0, 8)}`;
-  card.append(head, element("p", `${who} · ${campaign.daily_limit}/din · ${campaign.gap_minutes} min gap · ${hourLabel(campaign.start_hour)}–${hourLabel(campaign.end_hour)}`, "job-meta"));
+  card.append(head, element("p", `${who} · ${campaign.daily_limit}/din · ${campaign.gap_minutes} min gap · ${hourLabel(campaign.start_hour)}–${hourLabel(campaign.end_hour)} · ${proxyLabel(campaign.proxy || "in")}`, "job-meta"));
 
   const progress = element("section", undefined, "batch-progress");
   const heading = element("div", undefined, "batch-progress-heading");
@@ -1408,10 +1418,14 @@ function dmSettingsEditor(campaign) {
   const gap = dmGapSelect(campaign.gap_minutes);
   const start = dmHourSelect(0, 23, campaign.start_hour);
   const end = dmHourSelect(1, 24, campaign.end_hour);
+  const proxy = dmProxySelect(campaign.proxy || "in");
   const fields = element("div", undefined, "frame-fields");
   for (const [text, input] of [["Roz ke maximum DM", limit], ["Gap", gap], ["Kab se", start], ["Kab tak", end]]) {
     const label = element("label", text); label.append(input); fields.append(label);
   }
+  const proxyLabelNode = element("label", "Internet connection"); proxyLabelNode.append(proxy);
+  const proxyNote = element("p", DM_PROXY_NOTES[proxy.value] || "", "hint");
+  proxy.addEventListener("change", () => { proxyNote.textContent = DM_PROXY_NOTES[proxy.value] || ""; });
   const save = element("button", "Save karo", "quiet strong"); save.type = "button";
   const buttons = element("div", undefined, "frame-buttons"); buttons.append(save);
   save.addEventListener("click", async () => {
@@ -1419,12 +1433,12 @@ function dmSettingsEditor(campaign) {
     try {
       await api(`/api/dm/campaigns/${campaign.id}`, { method: "PUT", body: JSON.stringify({
         message: message.value, daily_limit: Number(limit.value), gap_minutes: Number(gap.value),
-        start_hour: Number(start.value), end_hour: Number(end.value) }) });
+        start_hour: Number(start.value), end_hour: Number(end.value), proxy: proxy.value }) });
       notice(`“${campaign.name}” ki settings save ho gayi.`);
       await loadDm();
     } catch (error) { explain(error); save.disabled = false; }
   });
-  form.append(messageLabel, message, fields, buttons);
+  form.append(messageLabel, message, fields, proxyLabelNode, proxyNote, buttons);
   details.append(form);
   return details;
 }
@@ -1477,6 +1491,9 @@ updateDmCounts();
 $("dm-message").addEventListener("input", () => { dmMessageTouched = true; updateDmCounts(); });
 for (const id of ["dm-usernames", "dm-limit", "dm-gap", "dm-start", "dm-end"]) $(id).addEventListener("input", updateDmCounts);
 $("dm-profile").addEventListener("change", updateDmProfile);
+const showDmProxyNote = () => { $("dm-proxy-note").textContent = DM_PROXY_NOTES[$("dm-proxy").value] || ""; };
+$("dm-proxy").addEventListener("change", showDmProxyNote);
+showDmProxyNote();
 $("dm-new").addEventListener("toggle", () => { if ($("dm-new").open && !dmProfilesLoaded) void loadDmProfiles(); });
 $("dm-reload").addEventListener("click", () => { dmProfilesLoaded = false; loadDm().catch(explain); });
 $("dm-form").addEventListener("submit", async (event) => {
@@ -1491,7 +1508,7 @@ $("dm-form").addEventListener("submit", async (event) => {
       name: $("dm-name").value.trim(), profile_id: profileId, profile_name: manual ? null : select.selectedOptions[0]?.dataset.name || null,
       message: $("dm-message").value, usernames: $("dm-usernames").value,
       daily_limit: Number($("dm-limit").value), gap_minutes: Number($("dm-gap").value),
-      start_hour: Number($("dm-start").value), end_hour: Number($("dm-end").value),
+      start_hour: Number($("dm-start").value), end_hour: Number($("dm-end").value), proxy: $("dm-proxy").value,
       requested_contact: $("dm-consent").checked
     }) });
     const parts = [`${data.added} creators list mein`];

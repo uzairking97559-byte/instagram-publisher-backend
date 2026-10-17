@@ -116,6 +116,7 @@ test("a campaign saves its list once, without duplicates, and only for people wh
   assert.equal((await create({ profile_id: "nope" })).data.error, "invalid_campaign");
   assert.equal((await create({ message: "" })).data.error, "invalid_campaign");
   assert.equal((await create({ gap_minutes: 1 })).data.error, "invalid_campaign");
+  assert.equal((await create({ proxy: "india" })).data.error, "invalid_campaign");
   assert.equal((await create({ usernames: "!!!" })).data.error, "invalid_usernames");
 
   const created = await create({ usernames: "one\ntwo\ntwo\n@three bad!name" });
@@ -126,6 +127,7 @@ test("a campaign saves its list once, without duplicates, and only for people wh
   assert.equal(item.status, "paused");
   assert.equal(item.pause_reason, "not_started");
   assert.equal(item.gap_minutes, 9);
+  assert.equal(item.proxy, "in", "India proxy unless the campaign says otherwise");
   assert.deepEqual(item.counts, { total: 3, pending: 3, sent: 0, skipped: 0, failed: 0, sent_today: 0 });
   const detail = await campaign(item.id);
   assert.deepEqual(detail.targets.map((row) => [row.username, row.status]), [["one", "pending"], ["two", "pending"], ["three", "pending"]]);
@@ -248,6 +250,24 @@ test("messages wait for the campaign's hours and its daily limit", async (t) => 
   const detail = await campaign(id);
   assert.equal(detail.campaign.counts.sent_today, 1);
   assert.equal(new Date(detail.campaign.next_send_at).toISOString(), "2026-10-20T02:30:00.000Z", "next day at 8:00 in India");
+});
+
+test("a campaign can send without a proxy, and its proxy can be changed while paused", async (t) => {
+  const { h, fake, cookie, create, campaign, start, tick } = await setup(t);
+  const id = (await create({ usernames: "one\ntwo", proxy: "none" })).data.campaign.id;
+  assert.equal((await campaign(id)).campaign.proxy, "none");
+  await start(id, { stop_after: 1 });
+  await tick();
+  const [first] = [...fake.browsers.values()];
+  assert.equal(first.body.proxyCountryCode, null, "no proxy: Browser Use's own connection");
+
+  const updated = await h.request(`/api/dm/campaigns/${id}`, { method: "PUT", cookie, body: { proxy: "in" } });
+  assert.equal(updated.data.campaign.proxy, "in");
+  assert.equal(updated.data.campaign.gap_minutes, 9, "other settings stay");
+  await start(id);
+  await tick();
+  const second = [...fake.browsers.values()][1];
+  assert.equal(second.body.proxyCountryCode, "in");
 });
 
 test("one account runs one campaign at a time; a running campaign cannot be deleted", async (t) => {
