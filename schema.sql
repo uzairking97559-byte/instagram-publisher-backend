@@ -208,6 +208,9 @@ CREATE TABLE IF NOT EXISTS dm_campaigns (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- The proxy country the campaign's browser uses, or 'none' for Browser Use's
+-- own connection (no proxy data to pay for).
+ALTER TABLE dm_campaigns ADD COLUMN IF NOT EXISTS proxy TEXT NOT NULL DEFAULT 'in' CHECK (proxy ~ '^([a-z]{2}|none)$');
 CREATE TABLE IF NOT EXISTS dm_targets (
   id BIGSERIAL PRIMARY KEY,
   campaign_id BIGINT NOT NULL REFERENCES dm_campaigns(id) ON DELETE CASCADE,
