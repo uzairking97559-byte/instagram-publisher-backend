@@ -82,7 +82,17 @@ async function launchChrome(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dm-chrome-"));
   const child = spawn(CHROME, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${dir}`, "--no-sandbox",
     "--disable-gpu", "--no-proxy-server", "--no-first-run", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  t.after(() => { child.kill("SIGKILL"); fs.rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGTERM");
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    // Chrome's helper processes can write to the profile for a moment longer;
+    // a leftover temporary folder is harmless.
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* ignore */ }
+  });
   return new Promise((resolve, reject) => {
     let output = "";
     const timer = setTimeout(() => reject(new Error("Chrome did not start")), 20000);
