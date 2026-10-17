@@ -241,7 +241,7 @@ textarea { resize: vertical; min-height: 110px; }
 }
 .tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   margin-top: 8px;
   padding: 3px;
@@ -561,3 +561,28 @@ footer a { color: var(--accent); }
 @media (max-width: 420px) { .frame-fields { grid-template-columns: 1fr; } }
 .caption-default .frame-buttons { margin-top: 8px; }
 .caption-default .quiet { font-size: 13px; min-height: 36px; padding: 6px 12px; }
+@media (max-width: 420px) { .tabs button { padding: 7px 2px; font-size: 13px; } }
+
+/* DM Sender */
+.dm-note { margin: 0 0 14px; padding: 12px 14px; border: 1px solid rgba(255, 159, 148, .35); border-radius: var(--radius); background: var(--danger-soft); color: #ffd0ca; font-size: 13px; line-height: 1.55; }
+.dm-new .dm-form { padding: 0 16px 16px; }
+.dm-new .dm-form label:first-child { margin-top: 2px; }
+.dm-new .hint { padding: 0; }
+.dm-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.dm-fields label { margin-top: 14px; }
+.dm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.dm-actions .dm-amount { width: auto; min-width: 0; flex: 1 1 150px; }
+.dm-actions .quiet.danger { margin-left: auto; }
+.job-card p.dm-cost { color: var(--text); }
+.dm-detail { margin-top: 8px; }
+.job-card p.dm-label { margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--faint); }
+.job-card p.dm-message { margin-top: 4px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--sunken); color: var(--text); white-space: pre-wrap; }
+.dm-targets { margin-top: 10px; max-height: 360px; overflow-y: auto; }
+.dm-target { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.dm-target > span:first-child { min-width: 0; }
+.dm-target a { color: var(--text); font-weight: 600; text-decoration: none; }
+.dm-target small { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); }
+.dm-detail textarea { min-height: 80px; font-size: 13px; }
+.badge.running, .badge.sending { background: var(--info-soft); color: var(--info); }
+.badge.completed, .badge.sent { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 420px) { .dm-fields { grid-template-columns: 1fr; } }

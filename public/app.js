@@ -68,7 +68,7 @@ let storage = null;
 // The account picked in the switcher ("all" for every account). Accounts,
 // Create post and Activity all follow it. Remembered per browser only.
 const ALL_ACCOUNTS = "all";
-const VIEWS = ["connections", "composer", "activity"];
+const VIEWS = ["connections", "composer", "activity", "dms"];
 let selectedAccount = /^\d{1,18}$/.test(readSetting("publisher-selected-account") || "") ? readSetting("publisher-selected-account") : ALL_ACCOUNTS;
 let accountsLoaded = false;
 let jobsScope = null;
@@ -137,6 +137,7 @@ function showView(name) {
   }
   writeSetting("publisher-view", name);
   if (location.hash !== `#${name}`) history.replaceState(null, "", `${location.pathname}#${name}`);
+  if (name === "dms") void loadDm().catch(explain); else updateDmPolling();
   // Keep the account bar pinned and start the new view from its top.
   const top = $("workspace").getBoundingClientRect().top + window.scrollY;
   if (!$("workspace").hidden && window.scrollY > top) window.scrollTo({ top });
@@ -1014,6 +1015,7 @@ $("logout").addEventListener("click", async () => {
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
+    dmState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); renderDm();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1133,6 +1135,375 @@ $("publish-form").addEventListener("submit", async (event) => {
       : (error?.detail || messages[error?.code] || "Batch schedule confirm nahi hui. Activity/History check karo; pending entry na ho tabhi dobara submit karo.");
   }
   finally { busy = false; busyAccount = null; renderAccounts(); }
+});
+
+// ---- DM Sender: messages creators who asked for promotion details, from the
+// owner's own Instagram account (a Browser Use profile), one at a time.
+const DM_DEFAULT_MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views 💸 Weekly Payments 🚀 No Earning Limit 🎬 Keep Posting Your Regular Reels 📱 Multiple Instagram Pages Allowed Simply add our promotional logo to your Reels and earn based on your eligible views. We also have a dedicated bot for Reel submissions and view tracking. Interested? Reply YES and I'll share the details!";
+const DM_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DM_GAPS = [3, 5, 7, 9, 10, 12, 15, 20, 30, 45, 60];
+const DM_BADGES = { running: "CHAL RAHA", paused: "RUKA HUA", completed: "POORA" };
+const DM_TARGET_BADGES = { pending: "BAAKI", sending: "BHEJ RAHA", sent: "BHEJA", skipped: "SKIP", failed: "FAILED" };
+const DM_PAUSES = {
+  not_started: "Abhi shuru nahi hua. Pehle “Pehle 5 (test)” chunkar Start dabao.",
+  owner: "Aapne pause kiya hai.",
+  test_done: "Test poora hua. Instagram app mein ye DMs check karo; sab theek ho to “Sab baaki” chunkar Start dabao.",
+  action_blocked: "Instagram ne warning di, isliye campaign ruk gaya. Kam se kam 24 ghante ruko, Instagram app mein account check karo, phir gap badhakar Start karo.",
+  logged_out: "Is profile mein Instagram login nahi mila. Browser Use profile mein dobara login karo, phir Start.",
+  challenge: "Instagram security check maang raha hai. Instagram app mein khud verify karo, phir Start.",
+  too_many_errors: "Lagatar 3 DM fail hue, isliye ruk gaya. List kholkar wajah dekho."
+};
+const DM_PROBLEMS = new Set(["action_blocked", "logged_out", "challenge", "too_many_errors", "browser_use_key_invalid", "browser_use_no_credits", "browser_use_not_found"]);
+const DM_REASONS = {
+  already_in_thread: "Chat mein ye message pehle se hai",
+  already_contacted: "Pehle kisi campaign se DM ja chuka",
+  not_found: "Account nahi mila",
+  no_message_button: "Message button nahi hai (DM band)",
+  blocked_after_send: "Bhejte waqt Instagram warning aayi",
+  profile_timeout: "Profile load nahi hui",
+  message_button_lost: "Message button nahi dab paya",
+  chat_not_opened: "Chat nahi khuli",
+  chat_ambiguous: "Sahi chat pehchan nahi payi",
+  focus_failed: "Message box nahi mila",
+  typing_failed: "Message type nahi ho paya",
+  send_unconfirmed: "Gaya ya nahi, confirm nahi hua · Instagram mein check karo",
+  browser_lost: "Browser connection toot gaya",
+  page_error: "Page mein error aaya"
+};
+Object.assign(messages, {
+  dm_not_configured: "DM Sender ke liye Browser Use key set nahi hai. Render → Environment mein BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
+  invalid_campaign: "Naam (60 akshar tak), profile, message (1000 akshar tak), roz ki limit 1–200, gap 2–60 minute aur shuru/band ka alag time check karo.",
+  contact_not_confirmed: "Neeche wala box tick karo: message sirf unhe jayega jinhone khud promotion ke liye comment/request kiya.",
+  invalid_usernames: "Koi sahi Instagram username nahi mila. Ek line mein ek username ya profile link daalo.",
+  too_many_usernames: "Ek campaign mein 2,000 se zyada creators nahi aa sakte.",
+  profile_busy: "Is Instagram account ka doosra campaign already chal raha hai. Pehle use Pause karo.",
+  nothing_to_send: "Is campaign mein bhejne ko koi creator nahi bacha.",
+  campaign_running: "Chalte campaign ko badal ya delete nahi kar sakte. Pehle Pause karo.",
+  campaign_not_found: "Campaign nahi mila. Refresh karo.",
+  browser_use_key_invalid: "Browser Use ne API key reject ki. Render mein BROWSER_USE_API_KEY check karo.",
+  browser_use_no_credits: "Browser Use account mein credits khatam ho gaye. Credits add karke Start karo.",
+  browser_use_not_found: "Browser Use mein ye profile nahi mila. Campaign ka profile check karo.",
+  browser_use_busy: "Browser Use abhi busy hai. Thodi der baad try karo.",
+  browser_use_failed: "Browser Use se sahi jawab nahi mila. Thodi der baad try karo.",
+  browser_use_unreachable: "Browser Use tak connection nahi hua. Thodi der baad try karo."
+});
+let dmState = null;
+let dmLoading = null;
+let dmPollTimer = null;
+let dmProfilesLoaded = false;
+let dmMessageTouched = false;
+const dmOpen = new Map();
+const dmTargets = new Map();
+
+function rupees(value) {
+  return `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function hourLabel(hour) { return hour === 24 ? "24:00 (raat 12)" : `${String(hour).padStart(2, "0")}:00`; }
+function dmPerDay(limit, gap, start, end) {
+  const hours = (((end - start) % 24) + 24) % 24 || 24;
+  return Math.max(1, Math.min(limit, Math.floor((hours * 60) / gap)));
+}
+function dmGapSelect(value) {
+  const gaps = [...new Set([...DM_GAPS, value])].sort((a, b) => a - b);
+  return frameSelect(gaps.map((gap) => [gap, gap === 60 ? "1 ghanta" : `${gap} minute`]), value);
+}
+function dmHourSelect(from, to, value) {
+  const hours = Array.from({ length: to - from + 1 }, (_, index) => from + index);
+  return frameSelect(hours.map((hour) => [hour, hourLabel(hour)]), value);
+}
+function fillSelect(target, source) {
+  const value = source.value;
+  target.replaceChildren(...source.options);
+  target.value = value;
+}
+
+async function loadDm() {
+  dmLoading ||= api("/api/dm").finally(() => { dmLoading = null; });
+  dmState = await dmLoading;
+  const latest = dmState.campaigns[0];
+  if (!dmMessageTouched) { $("dm-message").value = latest?.message || DM_DEFAULT_MESSAGE; updateDmCounts(); }
+  renderDm();
+  clearTemporaryUnavailable();
+  if (dmState.configured && !dmProfilesLoaded && $("dm-new").open) void loadDmProfiles();
+}
+function renderDm() {
+  const list = $("dm-campaigns");
+  list.replaceChildren();
+  $("dm-setup").hidden = !dmState || dmState.configured;
+  if (dmState) {
+    if (!dmState.campaigns.length) list.append(element("p", "Abhi koi campaign nahi hai. Neeche “Naya DM campaign” kholo.", "empty"));
+    for (const campaign of dmState.campaigns) list.append(dmCard(campaign));
+  }
+  updateDmPolling();
+}
+// While a campaign runs, its card refreshes every 20 seconds (only on this tab).
+function updateDmPolling() {
+  const active = !$("dms").hidden && !$("workspace").hidden && Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running"));
+  if (active && !dmPollTimer) {
+    dmPollTimer = setInterval(() => {
+      if ($("workspace").hidden || $("dms").hidden) { updateDmPolling(); return; }
+      // Don't redraw the cards while the owner is typing in one of them.
+      const focused = document.activeElement;
+      if (focused && $("dm-campaigns").contains(focused) && focused.matches("input, textarea, select")) return;
+      void loadDm().catch(explain);
+    }, 20000);
+  }
+  if (!active && dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
+}
+async function dmAction(button, path, body, done) {
+  button.disabled = true;
+  try {
+    const data = await api(path, { method: body === null ? "DELETE" : "POST", ...(body === null ? {} : { body: JSON.stringify(body) }) });
+    if (done) done(data);
+    await loadDm();
+  } catch (error) { explain(error); button.disabled = false; }
+}
+function dmCard(campaign) {
+  const counts = campaign.counts;
+  const card = element("article", undefined, "job-card dm-card");
+  const head = element("div", undefined, "job-head");
+  head.append(element("strong", campaign.name), element("span", DM_BADGES[campaign.status] || campaign.status, `badge ${campaign.status}`));
+  const who = campaign.profile_name || `Profile ${campaign.profile_id.slice(0, 8)}`;
+  card.append(head, element("p", `${who} · ${campaign.daily_limit}/din · ${campaign.gap_minutes} min gap · ${hourLabel(campaign.start_hour)}–${hourLabel(campaign.end_hour)}`, "job-meta"));
+
+  const progress = element("section", undefined, "batch-progress");
+  const heading = element("div", undefined, "batch-progress-heading");
+  heading.append(element("strong", `${counts.sent}/${counts.total} ko DM gaya`), element("span", `${counts.pending} baaki`));
+  const bar = document.createElement("progress");
+  bar.className = "progress-bar"; bar.max = Math.max(1, counts.total); bar.value = counts.total - counts.pending;
+  bar.setAttribute("aria-label", `${counts.sent} of ${counts.total} messaged`);
+  progress.append(heading, bar);
+  const stats = element("div", undefined, "stats");
+  for (const [value, label, tone] of [[counts.sent, "Bheje", "good"], [counts.pending, "Baaki", ""], [counts.skipped, "Skip", ""], [counts.failed, "Failed", counts.failed ? "bad" : ""]]) {
+    const stat = element("div", undefined, tone ? `stat ${tone}` : "stat");
+    stat.append(element("strong", String(value)), element("span", label));
+    stats.append(stat);
+  }
+  card.append(progress, stats);
+
+  if (campaign.status === "running") {
+    const parts = [`Aaj ${counts.sent_today}/${campaign.daily_limit}`];
+    if (campaign.next_send_at) parts.push(`Agla DM: ${formatWhen(campaign.next_send_at)}`);
+    if (campaign.stop_after) parts.push(`Test: ${campaign.sent_since_start}/${campaign.stop_after}`);
+    card.append(element("p", parts.join(" · "), "next-reel"));
+  } else if (counts.sent_today) {
+    card.append(element("p", `Aaj ${counts.sent_today}/${campaign.daily_limit} DM gaye.`));
+  }
+  const cost = campaign.cost;
+  card.append(element("p", `Kharcha: ${rupees(cost.inr)}${cost.per_dm_inr !== null ? ` · ${rupees(cost.per_dm_inr)} har DM` : ""} · ${cost.proxy_mb} MB data${campaign.browser_active ? " · browser abhi khula hai" : ""}`, "dm-cost"));
+  if (campaign.status === "paused" && campaign.pause_reason) {
+    const text = DM_PAUSES[campaign.pause_reason] || messages[campaign.pause_reason] || "Campaign ruka hua hai.";
+    const detail = campaign.pause_detail ? ` Instagram ne likha: “${campaign.pause_detail}”` : "";
+    card.append(element("p", text + detail, DM_PROBLEMS.has(campaign.pause_reason) ? "batch-error" : ""));
+  }
+  if (campaign.status === "completed") card.append(element("p", "Poori list ho gayi. Aur creators list kholkar jod sakte ho."));
+
+  const actions = element("div", undefined, "dm-actions");
+  if (campaign.status === "running") {
+    const pause = element("button", "Pause karo", "quiet strong"); pause.type = "button";
+    pause.addEventListener("click", () => dmAction(pause, `/api/dm/campaigns/${campaign.id}/pause`, {},
+      () => notice("Campaign pause ho gaya. Jo DM is waqt ja raha tha, wo poora ho sakta hai.")));
+    actions.append(pause);
+  } else if (counts.pending) {
+    const amount = frameSelect([[5, "Pehle 5 (test)"], [10, "Sirf 10"], [25, "Sirf 25"], [50, "Sirf 50"], ["", `Sab baaki (${counts.pending})`]], counts.sent ? "" : 5);
+    amount.className = "dm-amount"; amount.setAttribute("aria-label", "Kitne DM bhejne hain");
+    const start = element("button", "Start", "quiet strong"); start.type = "button"; start.disabled = !dmState.configured;
+    start.addEventListener("click", () => {
+      const stopAfter = amount.value ? Number(amount.value) : null;
+      if (!stopAfter && !confirm(`${counts.pending} creators ko DM jayenge: roz maximum ${campaign.daily_limit}, har ~${campaign.gap_minutes} minute mein ek. Start karein?`)) return;
+      void dmAction(start, `/api/dm/campaigns/${campaign.id}/start`, { stop_after: stopAfter },
+        () => notice(stopAfter ? `Start ho gaya: ${stopAfter} DM ke baad apne aap rukega. Pehla DM ek-do minute mein jayega.` : "Start ho gaya. Page band kar sakte ho, DM server se jaate rahenge."));
+    });
+    actions.append(amount, start);
+  }
+  if (campaign.status !== "running" && counts.failed) {
+    const retry = element("button", "Failed wale dobara list mein", "quiet"); retry.type = "button";
+    retry.addEventListener("click", () => dmAction(retry, `/api/dm/campaigns/${campaign.id}/retry-failed`, {},
+      (data) => notice(`${data.retried} creators wapas list mein. Start dabao; jinke chat mein message pehle se hai, unhe dobara nahi jayega.`)));
+    actions.append(retry);
+  }
+  if (campaign.status !== "running") {
+    const remove = element("button", "Delete", "quiet danger"); remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (!confirm(`“${campaign.name}” campaign aur uski list delete karni hai? Jo DM ja chuke hain, wo Instagram pe rahenge.`)) return;
+      void dmAction(remove, `/api/dm/campaigns/${campaign.id}`, null, () => { dmOpen.delete(campaign.id); dmTargets.delete(campaign.id); });
+    });
+    actions.append(remove);
+  }
+  card.append(actions);
+
+  const details = element("details", undefined, "batch-details");
+  details.open = dmOpen.get(campaign.id) || false;
+  details.append(element("summary", `Message aur creators ki list (${counts.total})`));
+  const body = element("div", undefined, "dm-detail");
+  details.append(body);
+  details.addEventListener("toggle", () => { dmOpen.set(campaign.id, details.open); if (details.open) void loadDmDetail(body, campaign); });
+  if (details.open) void loadDmDetail(body, campaign);
+  card.append(details);
+  return card;
+}
+async function loadDmDetail(body, campaign) {
+  const cached = dmTargets.get(campaign.id);
+  renderDmDetail(body, campaign, cached);
+  try {
+    const data = await api(`/api/dm/campaigns/${encodeURIComponent(campaign.id)}`);
+    dmTargets.set(campaign.id, data.targets);
+    if (body.isConnected) renderDmDetail(body, data.campaign, data.targets);
+  } catch (error) {
+    if (!cached && body.isConnected) body.replaceChildren(element("p", messages[error?.code] || "List load nahi hui. Dobara kholo.", "hint"));
+  }
+}
+function renderDmDetail(body, campaign, targets) {
+  body.replaceChildren(element("p", "Message", "dm-label"), element("p", campaign.message, "dm-message"));
+  if (!targets) body.append(element("p", "List load ho rahi hai…", "hint"));
+  else {
+    const list = element("div", undefined, "dm-targets");
+    for (const target of targets) {
+      const row = element("div", undefined, "dm-target");
+      const left = element("span");
+      const link = element("a", `@${target.username}`);
+      link.href = `https://www.instagram.com/${encodeURIComponent(target.username)}/`; link.target = "_blank"; link.rel = "noopener noreferrer";
+      left.append(link);
+      const note = target.status === "sent" && target.sent_at ? `Bheja: ${formatWhen(target.sent_at)}`
+        : target.reason ? DM_REASONS[target.reason] || messages[target.reason] || target.reason : "";
+      if (note) left.append(element("small", note));
+      row.append(left, element("span", DM_TARGET_BADGES[target.status] || target.status, `badge ${target.status}`));
+      list.append(row);
+    }
+    body.append(list);
+  }
+
+  const add = document.createElement("textarea");
+  add.id = `dm-add-${campaign.id}`; add.rows = 3; add.spellcheck = false;
+  add.placeholder = "Aur usernames ya profile links, ek line mein ek";
+  const addLabel = element("label", "Aur creators jodo"); addLabel.htmlFor = add.id;
+  const addButton = element("button", "List mein jodo", "quiet strong"); addButton.type = "button";
+  const addButtons = element("div", undefined, "frame-buttons"); addButtons.append(addButton);
+  addButton.addEventListener("click", async () => {
+    if (!add.value.trim()) return;
+    addButton.disabled = true;
+    try {
+      const data = await api(`/api/dm/campaigns/${campaign.id}/targets`, { method: "POST", body: JSON.stringify({ usernames: add.value }) });
+      const parts = [`${data.added} naye jode`];
+      if (data.already_listed) parts.push(`${data.already_listed} pehle se list mein`);
+      if (data.already_contacted) parts.push(`${data.already_contacted} ko pehle hi DM ja chuka`);
+      if (data.invalid.length) parts.push(`${data.invalid.length} galat: ${data.invalid.slice(0, 5).join(", ")}`);
+      notice(`${parts.join(" · ")}.`);
+      dmTargets.delete(campaign.id);
+      await loadDm();
+    } catch (error) { explain(error); addButton.disabled = false; }
+  });
+  body.append(addLabel, add, addButtons);
+  if (campaign.status !== "running") body.append(dmSettingsEditor(campaign));
+}
+function dmSettingsEditor(campaign) {
+  const details = element("details", undefined, "frame-settings");
+  details.append(element("summary", "Message ya speed badlo"));
+  const form = element("div", undefined, "frame-form");
+  const message = document.createElement("textarea");
+  message.id = `dm-edit-message-${campaign.id}`; message.rows = 5; message.maxLength = 1000; message.value = campaign.message;
+  const messageLabel = element("label", "Message"); messageLabel.htmlFor = message.id;
+  const limit = document.createElement("input");
+  limit.type = "number"; limit.min = "1"; limit.max = "200"; limit.step = "1"; limit.value = String(campaign.daily_limit);
+  const gap = dmGapSelect(campaign.gap_minutes);
+  const start = dmHourSelect(0, 23, campaign.start_hour);
+  const end = dmHourSelect(1, 24, campaign.end_hour);
+  const fields = element("div", undefined, "frame-fields");
+  for (const [text, input] of [["Roz ke maximum DM", limit], ["Gap", gap], ["Kab se", start], ["Kab tak", end]]) {
+    const label = element("label", text); label.append(input); fields.append(label);
+  }
+  const save = element("button", "Save karo", "quiet strong"); save.type = "button";
+  const buttons = element("div", undefined, "frame-buttons"); buttons.append(save);
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await api(`/api/dm/campaigns/${campaign.id}`, { method: "PUT", body: JSON.stringify({
+        message: message.value, daily_limit: Number(limit.value), gap_minutes: Number(gap.value),
+        start_hour: Number(start.value), end_hour: Number(end.value) }) });
+      notice(`“${campaign.name}” ki settings save ho gayi.`);
+      await loadDm();
+    } catch (error) { explain(error); save.disabled = false; }
+  });
+  form.append(messageLabel, message, fields, buttons);
+  details.append(form);
+  return details;
+}
+
+async function loadDmProfiles() {
+  const select = $("dm-profile");
+  const keep = select.value;
+  let profiles = [];
+  let failed = false;
+  try { profiles = (await api("/api/dm/profiles")).profiles; } catch { failed = true; }
+  select.replaceChildren(element("option", profiles.length ? "Profile chuno" : failed ? "Profiles load nahi hui · ID khud daalo" : "Koi profile nahi mili · ID khud daalo"));
+  select.firstChild.value = "";
+  for (const profile of profiles) {
+    const option = element("option", `${profile.name || "Profile"} · ${profile.id.slice(0, 8)}`);
+    option.value = profile.id; option.dataset.name = profile.name || "";
+    select.append(option);
+  }
+  const manual = element("option", "Profile ID khud daalo…"); manual.value = "manual";
+  select.append(manual);
+  select.value = [...select.options].some((option) => option.value === keep && keep) ? keep : profiles.length === 1 ? profiles[0].id : "";
+  dmProfilesLoaded = !failed;
+  updateDmProfile();
+}
+function updateDmProfile() {
+  const manual = $("dm-profile").value === "manual";
+  $("dm-profile-manual").hidden = !manual;
+  $("dm-profile-id").required = manual;
+}
+function countEntries(text) {
+  return new Set(text.split(/[\s,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean)).size;
+}
+function updateDmCounts() {
+  $("dm-message-count").textContent = `${[...$("dm-message").value].length} / 1000`;
+  const entries = countEntries($("dm-usernames").value);
+  $("dm-usernames-count").textContent = entries
+    ? `${entries} entries · duplicate aur galat entries save karte waqt hat jayengi. Jinhe pehle DM ja chuka hai, unhe dobara nahi jayega.`
+    : "Duplicate apne aap hat jayenge. Jinhe pehle kisi campaign se message ja chuka hai, unhe dobara nahi jayega.";
+  const limit = Math.min(200, Math.max(1, Number($("dm-limit").value) || 1));
+  const gap = Number($("dm-gap").value), start = Number($("dm-start").value), end = Number($("dm-end").value);
+  if (start === end % 24) { $("dm-estimate").textContent = "Shuru aur band ka time alag rakho."; return; }
+  const perDay = dmPerDay(limit, gap, start, end);
+  $("dm-estimate").textContent = `≈ ${perDay} DM roz (${hourLabel(start)}–${hourLabel(end)} India time, har ~${gap} minute mein ek).`
+    + (entries ? ` ${entries} creators ≈ ${Math.ceil(entries / perDay)} din.` : "");
+}
+fillSelect($("dm-gap"), dmGapSelect(9));
+fillSelect($("dm-start"), dmHourSelect(0, 23, 8));
+fillSelect($("dm-end"), dmHourSelect(1, 24, 23));
+$("dm-message").value = DM_DEFAULT_MESSAGE;
+updateDmCounts();
+$("dm-message").addEventListener("input", () => { dmMessageTouched = true; updateDmCounts(); });
+for (const id of ["dm-usernames", "dm-limit", "dm-gap", "dm-start", "dm-end"]) $(id).addEventListener("input", updateDmCounts);
+$("dm-profile").addEventListener("change", updateDmProfile);
+$("dm-new").addEventListener("toggle", () => { if ($("dm-new").open && !dmProfilesLoaded) void loadDmProfiles(); });
+$("dm-reload").addEventListener("click", () => { dmProfilesLoaded = false; loadDm().catch(explain); });
+$("dm-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const select = $("dm-profile");
+  const manual = select.value === "manual";
+  const profileId = (manual ? $("dm-profile-id").value : select.value).trim();
+  if (!DM_UUID.test(profileId)) { notice("Browser Use profile chuno, ya uski poori ID (36 akshar) daalo.", true); return; }
+  const button = $("dm-save"); button.disabled = true;
+  try {
+    const data = await api("/api/dm/campaigns", { method: "POST", body: JSON.stringify({
+      name: $("dm-name").value.trim(), profile_id: profileId, profile_name: manual ? null : select.selectedOptions[0]?.dataset.name || null,
+      message: $("dm-message").value, usernames: $("dm-usernames").value,
+      daily_limit: Number($("dm-limit").value), gap_minutes: Number($("dm-gap").value),
+      start_hour: Number($("dm-start").value), end_hour: Number($("dm-end").value),
+      requested_contact: $("dm-consent").checked
+    }) });
+    const parts = [`${data.added} creators list mein`];
+    if (data.already_contacted) parts.push(`${data.already_contacted} ko pehle hi DM ja chuka (skip)`);
+    if (data.invalid.length) parts.push(`${data.invalid.length} galat entries chhodi: ${data.invalid.slice(0, 5).join(", ")}`);
+    notice(`Campaign save ho gaya: ${parts.join(" · ")}. Ab card pe “Pehle 5 (test)” chunkar Start dabao.`);
+    $("dm-name").value = ""; $("dm-usernames").value = ""; $("dm-consent").checked = false;
+    $("dm-new").open = false;
+    updateDmCounts();
+    await loadDm();
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
 });
 const status = new URLSearchParams(location.search).get("notice");
 if (status && messages[status]) notice(messages[status], !["connected", "connection_processing", "connection_cancelled"].includes(status));
