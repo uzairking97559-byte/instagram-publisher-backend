@@ -71,6 +71,20 @@ Uploading is unchanged. A background worker in the web process frames queued Ree
 
 `npm install` runs `scripts/install-ffmpeg.js`, which downloads a pinned static ffmpeg 6.0 build for linux-x64 into `bin/` and checks its SHA-256. If it cannot (another platform, no network), framing is unavailable but nothing else is affected. Set `FFMPEG_PATH` to use an installed ffmpeg, or `SKIP_FFMPEG_DOWNLOAD=1` to skip the download. Fonts are Lora (SIL Open Font License, `assets/frame/fonts/OFL.txt`).
 
+## DM Sender
+
+The **DMs** tab sends one message to Instagram creators who asked for promotion details (for example by commenting on a Reel), from the owner's own Instagram account. It does not use the Meta API: the account stays logged in inside a [Browser Use](https://browser-use.com) cloud browser profile, and the server drives that browser over the Chrome DevTools Protocol with fixed steps (`lib/instagram-dm.js`, no AI model per message). Images, video and fonts are not downloaded, and one browser is reused for many messages, to keep proxy data small.
+
+- A **campaign** has a name, a Browser Use profile (one Instagram account), the message (up to 1,000 characters), a list of up to 2,000 usernames or profile links, a daily limit (1–200, default 100), a gap between messages (2–60 minutes, default 9, varied ±20%) and the hours to send in, India time (default 08:00–23:00). The owner must confirm that the people on the list asked to be contacted.
+- Nobody gets the message twice: a username already messaged from any campaign is skipped, and before typing, the chat is checked for the same message.
+- **Start** can stop after a number of messages (the form suggests a 5-message test first). Any Instagram warning ("Try again later", restricted), logout or security check pauses the campaign and closes the browser; so do three failures in a row, a rejected key or no credits. The owner checks Instagram and starts again. One account runs one campaign at a time.
+- The worker runs every 15 seconds in the web process. A database lease keeps two copies of the service (for example during a deploy) from sending at once; on start-up, browsers left open by an earlier run are stopped (which also saves the profile's login) and a message cut off by the restart is tried again (the chat check prevents a repeat).
+- Each card shows the cost in rupees (Browser Use browser time and proxy data, converted at `DM_USD_INR`, default 96.5) and the cost per message.
+
+Set `BROWSER_USE_API_KEY` in the service's environment (never in code or chat). Without it the tab still saves campaigns but cannot start them. `DM_PROXY_COUNTRY` (default `in`) should match the country the profile logged in from. `npm test` runs the driver against a fake Instagram page only when `DM_TEST_CHROME` points to a Chrome/Chromium binary.
+
+Sending messages through the website instead of the official API is outside Meta's platform terms, and messages to people who do not follow the account land in their message requests. Keep the pace low and stop when Instagram warns.
+
 ## API
 
 All account/job routes require the owner session cookie. All writes require an exact canonical `Origin` and host. Public API keys, arbitrary access-token request bodies and anonymous publishing are not supported.
@@ -101,6 +115,12 @@ All account/job routes require the owner session cookie. All writes require an e
 | `PUT /api/accounts/:connectionId/progress` | Save a post target and the owner's pre-existing scheduled/published count |
 | `GET /api/jobs` | Latest 500 receipts, including batch progress; `?connection_id=` limits them to one account |
 | `POST /api/jobs/:jobId/publish` | Check and finish an existing request, or recover status |
+| `GET /api/dm` | DM Sender status (key set or not) and every campaign with counts and cost |
+| `GET /api/dm/profiles` | Browser Use profiles to send from |
+| `POST /api/dm/campaigns` | Create a campaign (paused) from settings and pasted usernames; needs `requested_contact: true` |
+| `GET`/`PUT`/`DELETE /api/dm/campaigns/:id` | A campaign with its list; change settings or delete while it is not running |
+| `POST /api/dm/campaigns/:id/targets` | Add usernames to a campaign |
+| `POST /api/dm/campaigns/:id/start`, `.../pause`, `.../retry-failed` | Start (optional `stop_after`), pause, or put failed usernames back in the list |
 
 Example photo body (also send the idempotency header):
 

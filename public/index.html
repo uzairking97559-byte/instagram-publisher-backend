@@ -54,6 +54,7 @@
           <button id="tab-connections" type="button" role="tab" aria-controls="connections" aria-selected="true">Accounts</button>
           <button id="tab-composer" type="button" role="tab" aria-controls="composer" aria-selected="false" tabindex="-1">Create post</button>
           <button id="tab-activity" type="button" role="tab" aria-controls="activity" aria-selected="false" tabindex="-1">Activity</button>
+          <button id="tab-dms" type="button" role="tab" aria-controls="dms" aria-selected="false" tabindex="-1">DMs</button>
         </div>
       </div>
 
@@ -119,6 +120,45 @@
         </div>
         <div id="jobs" class="jobs"></div>
         <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
+      </section>
+
+      <section id="dms" class="view" role="tabpanel" aria-labelledby="tab-dms" hidden>
+        <div class="view-head">
+          <div><h2>DM Sender</h2><p class="muted">Jin creators ne promotion ke liye comment kiya, unhe aapke account se ek-ek karke message.</p></div>
+          <button id="dm-reload" class="quiet" type="button">Refresh</button>
+        </div>
+        <p id="dm-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak campaign aur list bana sakte ho, bhejna shuru nahi hoga.</p>
+        <div id="dm-campaigns" class="jobs"></div>
+        <details id="dm-new" class="add-account dm-new">
+          <summary><span class="plus" aria-hidden="true">+</span>Naya DM campaign</summary>
+          <form id="dm-form" class="dm-form">
+            <label for="dm-name">Campaign ka naam</label>
+            <input id="dm-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Reel comments · list 1">
+            <label for="dm-profile">Kis Instagram account se (Browser Use profile)</label>
+            <select id="dm-profile" required><option value="">Profiles load ho rahi hain…</option></select>
+            <div id="dm-profile-manual" hidden>
+              <label for="dm-profile-id">Profile ID</label>
+              <input id="dm-profile-id" type="text" maxlength="36" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            </div>
+            <p class="hint">Har Instagram account ka apna profile hota hai, jismein wo account login hai. Ek account se ek time pe ek hi campaign chalega.</p>
+            <label for="dm-message">Message <span id="dm-message-count" class="muted">0 / 1000</span></label>
+            <textarea id="dm-message" rows="6" maxlength="1000" required></textarea>
+            <label for="dm-usernames">Creators · ek line mein ek username ya profile link</label>
+            <textarea id="dm-usernames" rows="7" required spellcheck="false" autocomplete="off" placeholder="shobhajee1&#10;@daily_jokes7738&#10;https://www.instagram.com/shinchan_edits.01/"></textarea>
+            <p id="dm-usernames-count" class="hint">Duplicate apne aap hat jayenge. Jinhe pehle kisi campaign se message ja chuka hai, unhe dobara nahi jayega.</p>
+            <div class="dm-fields">
+              <div><label for="dm-limit">Roz ke maximum DM</label><input id="dm-limit" type="number" min="1" max="200" step="1" value="100" required></div>
+              <div><label for="dm-gap">Har DM ke beech gap</label><select id="dm-gap"></select></div>
+              <div><label for="dm-start">Kab se (India time)</label><select id="dm-start"></select></div>
+              <div><label for="dm-end">Kab tak</label><select id="dm-end"></select></div>
+            </div>
+            <p id="dm-estimate" class="hint"></p>
+            <label class="check"><input id="dm-consent" type="checkbox" required><span>Is list ke sab creators ne promotion details ke liye khud comment/request kiya hai.</span></label>
+            <button id="dm-save" class="primary" type="submit">Campaign save karo <span aria-hidden="true">↗</span></button>
+            <p class="hint">Save karne se bhejna shuru nahi hota. Card pe pehle “5 ka test” chalao, Instagram mein check karo, phir baaki ke liye Start.</p>
+          </form>
+        </details>
+        <div class="activity-note"><strong>Account ki safety.</strong><p>Har DM ke beech gap rehta hai aur sirf chune hue ghanton mein DM jaate hain. Instagram koi warning de, logout kare ya security check maange to campaign apne aap ruk jayega; Instagram app mein check karke hi dobara Start karo. Kharcha ₹ mein card pe dikhta hai.</p></div>
       </section>
 
       <footer><span>Creator Publishing Tool</span><span>Independent service · Meta se affiliated nahi · <a href="/about.html">Service details</a></span></footer>

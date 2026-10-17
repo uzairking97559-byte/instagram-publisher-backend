@@ -185,3 +185,60 @@ ALTER TABLE publisher_media_parts ALTER COLUMN data SET STORAGE EXTERNAL;
 ALTER TABLE publisher_frame_settings DROP CONSTRAINT IF EXISTS publisher_frame_settings_box_percent_check;
 ALTER TABLE publisher_frame_settings ADD CONSTRAINT publisher_frame_settings_box_percent_check
   CHECK (box_percent IN (25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80));
+
+-- DM Sender (lib/dm.js): the owner's message to creators who asked for
+-- promotion details, sent from an Instagram login kept in a Browser Use profile.
+CREATE TABLE IF NOT EXISTS dm_campaigns (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  profile_id UUID NOT NULL,
+  profile_name TEXT,
+  message TEXT NOT NULL,
+  daily_limit INTEGER NOT NULL DEFAULT 100 CHECK (daily_limit BETWEEN 1 AND 200),
+  gap_seconds INTEGER NOT NULL DEFAULT 540 CHECK (gap_seconds BETWEEN 120 AND 3600),
+  start_hour INTEGER NOT NULL DEFAULT 8 CHECK (start_hour BETWEEN 0 AND 23),
+  end_hour INTEGER NOT NULL DEFAULT 23 CHECK (end_hour BETWEEN 1 AND 24),
+  stop_after INTEGER CHECK (stop_after IS NULL OR stop_after BETWEEN 1 AND 1000),
+  sent_since_start INTEGER NOT NULL DEFAULT 0,
+  consecutive_errors INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('running', 'paused', 'completed')),
+  pause_reason TEXT,
+  pause_detail TEXT,
+  next_send_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS dm_targets (
+  id BIGSERIAL PRIMARY KEY,
+  campaign_id BIGINT NOT NULL REFERENCES dm_campaigns(id) ON DELETE CASCADE,
+  username TEXT NOT NULL CHECK (username ~ '^[a-z0-9._]{1,30}$'),
+  position INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'skipped', 'failed')),
+  reason TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  sent_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (campaign_id, username)
+);
+CREATE INDEX IF NOT EXISTS dm_targets_queue_idx ON dm_targets(campaign_id, status, position);
+CREATE INDEX IF NOT EXISTS dm_targets_username_idx ON dm_targets(username, status);
+-- One Browser Use cloud browser per row, with what it cost (USD).
+CREATE TABLE IF NOT EXISTS dm_browsers (
+  id UUID PRIMARY KEY,
+  profile_id UUID NOT NULL,
+  campaign_id BIGINT REFERENCES dm_campaigns(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped')),
+  dms_sent INTEGER NOT NULL DEFAULT 0,
+  proxy_mb NUMERIC NOT NULL DEFAULT 0,
+  proxy_cost_usd NUMERIC NOT NULL DEFAULT 0,
+  browser_cost_usd NUMERIC NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  stopped_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS dm_browsers_campaign_idx ON dm_browsers(campaign_id);
+-- Only one running copy of the service sends DMs (a deploy briefly runs two).
+CREATE TABLE IF NOT EXISTS dm_worker_lease (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  owner TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
