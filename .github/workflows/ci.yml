@@ -35,7 +35,21 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Run automated tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
         env:
           # The DM driver test drives the runner's Chrome against a fake Instagram page.
           DM_TEST_CHROME: /usr/bin/google-chrome
+      # Failed tests also show up as an annotation on the check, readable without the full log.
+      - name: Point out failed tests
+        if: failure()
+        run: |
+          node -e '
+            const lines = require("node:fs").readFileSync("test-output.txt", "utf8").split("\n");
+            const blocks = [];
+            lines.forEach((line, index) => { if (/^\s*not ok /.test(line)) blocks.push(lines.slice(index, index + 40).join("\n")); });
+            const text = (blocks.join("\n----\n") || lines.slice(-120).join("\n")).slice(0, 30000);
+            console.log("::error title=Failed tests::" + text.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A"));
+          '
