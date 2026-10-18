@@ -15,7 +15,7 @@ const { createInstagramDriver } = require("../lib/instagram-dm");
 
 const CHROME = process.env.DM_TEST_CHROME;
 const MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views. Interested? Reply YES and I'll share the details!";
-const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, poll: 100 };
+const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, poll: 100 };
 
 function page(body) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<script>${SCRIPT}</script></body></html>`;
@@ -54,6 +54,38 @@ for (const button of document.querySelectorAll('[data-open]')) {
 }
 for (const button of document.querySelectorAll('[data-dismiss]')) button.addEventListener('click', () => button.closest('[role=dialog]').remove());
 if (window.PRE_OPEN) openChat(window.PRE_OPEN, []);
+// INBOX: a Direct inbox whose "New message" dialog searches these users, and
+// whose Chat button opens the chat in place (the address changes, no reload).
+if (window.INBOX) {
+  const users = window.INBOX;
+  document.querySelector('[data-compose]').addEventListener('click', () => setTimeout(() => {
+    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
+    dialog.innerHTML = '<div>New message</div><div>To:</div><input name="queryBox" placeholder="Search..."><div class="results"></div>' +
+      '<div role="button" aria-disabled="true" class="go">Chat</div><div role="button" class="x"><svg aria-label="Close" width="10" height="10"></svg></div>';
+    const input = dialog.querySelector('input'), results = dialog.querySelector('.results'), go = dialog.querySelector('.go');
+    let chosen = null;
+    input.addEventListener('input', () => setTimeout(() => {
+      results.innerHTML = '';
+      const query = input.value.trim().toLowerCase();
+      for (const [name, info] of Object.entries(users)) {
+        if (!query || !name.startsWith(query)) continue;
+        const row = document.createElement('label');
+        row.innerHTML = '<div>' + info.name + '</div><div>' + name + '</div><input type="checkbox">';
+        row.addEventListener('click', () => { chosen = name; go.setAttribute('aria-disabled', 'false'); });
+        results.append(row);
+      }
+    }, 150));
+    go.addEventListener('click', () => {
+      if (go.getAttribute('aria-disabled') === 'true') return;
+      dialog.remove();
+      for (const old of document.querySelectorAll('section')) old.remove();
+      history.pushState(null, '', '/direct/t/' + chosen + '/');
+      setTimeout(() => openChat(users[chosen].name, users[chosen].old), 150);
+    });
+    dialog.querySelector('.x').addEventListener('click', () => dialog.remove());
+    document.body.append(dialog);
+  }, 100));
+}
 `;
 function profile(user, { button = true, extra = "", setup = "" } = {}) {
   return page(`<script>${setup}</script><header><h2>${user}</h2><span>1,234 followers</span></header>
@@ -76,7 +108,9 @@ function site(requests) {
     "/lazy/": profile("lazy", { setup: "window.LAZY = true;" }),
     "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
     "/vanish/": profile("vanish", { setup: "window.VANISH = true;" }),
-    "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>')
+    "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>'),
+    "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] } })};</script>` +
+      '<nav><div role="button" tabindex="0" data-compose><svg aria-label="New message" role="img" width="24" height="24"></svg></div></nav><img src="/picture.png" alt="">')
   };
   return http.createServer((req, res) => {
     requests.push(req.url);
@@ -105,7 +139,7 @@ async function launchChrome(t) {
   });
   return new Promise((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error("Chrome did not start")), 20000);
+    const timer = setTimeout(() => reject(new Error("Chrome did not start")), 60000);
     child.stderr.on("data", (chunk) => {
       output += chunk;
       const match = output.match(/DevTools listening on (ws:\/\/\S+)/);
@@ -120,7 +154,7 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  const session = await createInstagramDriver({ baseUrl, timing: FAST, method: "profile" }).open(await launchChrome(t));
   t.after(() => session.close());
   const send = (username, message = MESSAGE) => session.sendDm({ username, message });
 
@@ -154,4 +188,23 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   const usage = session.usage();
   assert.ok(usage.bytes > 0 && usage.byType.Document > 0);
   assert.equal(session.usage().bytes, 0);
+});
+
+test("sends from the Direct inbox, loading the inbox page only once", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const requests = [];
+  const server = site(requests);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+  const send = (username, message = MESSAGE) => session.sendDm({ username, message });
+
+  assert.deepEqual(await send("alice3"), { status: "sent" });
+  assert.deepEqual(await send("bob3"), { status: "skipped", reason: "already_in_thread" });
+  assert.deepEqual(await send("carol3"), { status: "skipped", reason: "not_found" }, "no such account in the search");
+  assert.deepEqual(await send("alice3", "A second short hello for alice3"), { status: "sent" });
+  await session.idle();
+  assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 1, "the inbox page loads once");
+  assert.equal(requests.includes("/picture.png"), false);
 });
