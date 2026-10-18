@@ -39,7 +39,7 @@ async function harness(t, options = {}) {
   const logs = [];
   const handler = { run: options.meta || (() => { throw new Error("Unexpected outbound call"); }) };
   const app = await createApp({ env, db: options.noDb ? null : db, logger: (entry) => logs.push(entry), metaTimeoutMs: options.timeout || 1000,
-    frameOptions: options.frameOptions, dmOptions: options.dmOptions,
+    frameOptions: options.frameOptions, dmOptions: options.dmOptions, checkOptions: options.checkOptions,
     fetchImpl: async (url, init) => {
       calls.push({ url: new URL(url), init });
       return handler.run(new URL(url), init);

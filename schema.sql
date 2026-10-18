@@ -245,3 +245,31 @@ CREATE TABLE IF NOT EXISTS dm_worker_lease (
   owner TEXT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Creator list check: which usernames are still professional accounts and
+-- when they last posted (Instagram Business Discovery, see lib/checks.js).
+CREATE TABLE IF NOT EXISTS creator_checks (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  active_days INTEGER NOT NULL DEFAULT 30 CHECK (active_days BETWEEN 1 AND 365),
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'done')),
+  pause_reason TEXT,
+  not_found_streak INTEGER NOT NULL DEFAULT 0,
+  next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS creator_check_items (
+  id BIGSERIAL PRIMARY KEY,
+  check_id BIGINT NOT NULL REFERENCES creator_checks(id) ON DELETE CASCADE,
+  username TEXT NOT NULL CHECK (username ~ '^[a-z0-9._]{1,30}$'),
+  position INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'found', 'not_found', 'error')),
+  followers INTEGER,
+  media_count INTEGER,
+  last_post_at TIMESTAMPTZ,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  checked_at TIMESTAMPTZ,
+  UNIQUE (check_id, username)
+);
+CREATE INDEX IF NOT EXISTS creator_check_items_queue_idx ON creator_check_items(check_id, status, position);
