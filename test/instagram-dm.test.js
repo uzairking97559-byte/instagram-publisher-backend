@@ -139,7 +139,7 @@ async function launchChrome(t) {
   });
   return new Promise((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error("Chrome did not start")), 20000);
+    const timer = setTimeout(() => reject(new Error("Chrome did not start")), 60000);
     child.stderr.on("data", (chunk) => {
       output += chunk;
       const match = output.match(/DevTools listening on (ws:\/\/\S+)/);
