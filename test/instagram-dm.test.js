@@ -130,6 +130,9 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   // Pictures are refused before they download.
   assert.equal(requests.includes("/picture.png"), false);
   assert.deepEqual(await send("bob"), { status: "skipped", reason: "already_in_thread" });
+  // Another version of the message is still a repeat when an earlier version is in the chat.
+  assert.deepEqual(await session.sendDm({ username: "bob", message: "A different short version", previous: [MESSAGE, "A different short version"] }),
+    { status: "skipped", reason: "already_in_thread" });
   assert.deepEqual(await send("carol"), { status: "skipped", reason: "no_message_button" });
   assert.deepEqual(await send("ghost"), { status: "skipped", reason: "not_found" });
   assert.deepEqual(await send("twopanel"), { status: "sent" });
@@ -147,4 +150,8 @@ test("sends, skips and stops like the DM worker expects", { skip: !CHROME && "se
   assert.deepEqual(await send("login"), { status: "blocked", reason: "logged_out", text: null, attempted: false });
   await session.idle();
   assert.equal(session.alive(), true);
+  // Downloaded data is counted by type, and the count starts again after reading it.
+  const usage = session.usage();
+  assert.ok(usage.bytes > 0 && usage.byType.Document > 0);
+  assert.equal(session.usage().bytes, 0);
 });

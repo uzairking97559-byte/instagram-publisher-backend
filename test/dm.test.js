@@ -55,8 +55,8 @@ function fakeDriver(results = {}) {
       let alive = true;
       return {
         alive: () => alive,
-        sendDm: async ({ username, message }) => {
-          sent.push({ username, message });
+        sendDm: async ({ username, message, previous }) => {
+          sent.push({ username, message, previous });
           return results[username] || { status: "sent" };
         },
         idle: async () => {},
@@ -268,6 +268,18 @@ test("a campaign can send without a proxy, and its proxy can be changed while pa
   await tick();
   const second = [...fake.browsers.values()][1];
   assert.equal(second.body.proxyCountryCode, "in");
+});
+
+test("each DM uses one version of the message with the creator's username in it", async (t) => {
+  const { driver, create, start, tick } = await setup(t);
+  const message = "Hi {username}, short offer A\n---\nHello {USERNAME}! short offer B\n  ---  \nHey { name } short offer C";
+  const id = (await create({ usernames: "one", message })).data.campaign.id;
+  await start(id);
+  await tick();
+  assert.equal(driver.sent.length, 1);
+  assert.equal(driver.sent[0].message, "Hello one! short offer B", "random 0.5 picks the middle version");
+  assert.deepEqual(driver.sent[0].previous, ["Hi one, short offer A", "Hello one! short offer B", "Hey one short offer C"]);
+  assert.equal((await create({ message: Array.from({ length: 11 }, (_, i) => `v${i}`).join("\n---\n") })).data.error, "invalid_campaign");
 });
 
 test("one account runs one campaign at a time; a running campaign cannot be deleted", async (t) => {
