@@ -85,6 +85,12 @@ Set `BROWSER_USE_API_KEY` in the service's environment (never in code or chat). 
 
 Sending messages through the website instead of the official API is outside Meta's platform terms, and messages to people who do not follow the account land in their message requests. Keep the pace low and stop when Instagram warns.
 
+## Creator list check
+
+In the DMs tab, **Creator list check** takes a pasted list or a .txt/.csv file of usernames or profile links (when links are present, only the links count, so a sheet's name column is ignored) and checks each one through Instagram's Business Discovery API: whether it is still a professional account, its followers and when it last posted. Results are split into active (a post within the chosen number of days, default 30), old, and not found (renamed, deleted or no longer professional). The active ones, biggest first, can be copied or put straight into a new DM campaign.
+
+It needs one account connected through **Facebook Login with the extra `instagram_manage_insights` permission** (the "Facebook se permission do" link, `/auth/meta/start?extra=insights`); normal connections do not ask for it. The background worker checks one username every 20 seconds (`CHECK_INTERVAL_SECONDS`), about 180 an hour, waits 30 minutes when Instagram reports its rate limit, and pauses when the connection expires or the permission is missing.
+
 ## API
 
 All account/job routes require the owner session cookie. All writes require an exact canonical `Origin` and host. Public API keys, arbitrary access-token request bodies and anonymous publishing are not supported.
@@ -120,6 +126,7 @@ All account/job routes require the owner session cookie. All writes require an e
 | `POST /api/dm/campaigns` | Create a campaign (paused) from settings and pasted usernames; needs `requested_contact: true` |
 | `GET`/`PUT`/`DELETE /api/dm/campaigns/:id` | A campaign with its list; change settings or delete while it is not running |
 | `POST /api/dm/campaigns/:id/targets` | Add usernames to a campaign |
+| `GET`/`POST /api/checks`, `GET /api/checks/:id[?filter=]`, `GET .../usernames`, `POST .../pause\|start`, `DELETE /api/checks/:id` | Creator list check: create, results (active/old/not_found/pending/error), usernames, pause/start, delete |
 | `POST /api/dm/campaigns/:id/start`, `.../pause`, `.../retry-failed` | Start (optional `stop_after`), pause, or put failed usernames back in the list |
 
 Example photo body (also send the idempotency header):

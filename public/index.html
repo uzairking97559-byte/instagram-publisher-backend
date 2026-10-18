@@ -127,6 +127,25 @@
           <div><h2>DM Sender</h2><p class="muted">Jin creators ne promotion ke liye comment kiya, unhe aapke account se ek-ek karke message.</p></div>
           <button id="dm-reload" class="quiet" type="button">Refresh</button>
         </div>
+        <details id="check-panel" class="add-account dm-new">
+          <summary><span class="plus" aria-hidden="true">+</span>Creator list check · active / purane / nahi mile</summary>
+          <div class="dm-form">
+            <p class="hint">Instagram ki official API se har username check hota hai: account abhi hai ya nahi, followers kitne, aur aakhri post kab ki. Background mein ~<span id="check-rate">180</span> naam per ghanta.</p>
+            <p id="check-connect" class="dm-note" hidden>Iske liye ek account Facebook se, ek extra permission ke saath, connect karna hoga (sirf ek baar). <a id="check-connect-link" class="quiet strong" href="/auth/meta/start?extra=insights">Facebook se permission do ↗</a></p>
+            <div id="check-list" class="jobs"></div>
+            <form id="check-form">
+              <label for="check-name">List ka naam</label>
+              <input id="check-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Comments sheet 6400">
+              <label for="check-file">File (.txt ya .csv) <span class="muted">ya neeche paste karo</span></label>
+              <input id="check-file" type="file" accept=".txt,.csv,text/plain,text/csv">
+              <textarea id="check-text" rows="5" spellcheck="false" autocomplete="off" placeholder="Usernames ya profile links, ek line mein ek"></textarea>
+              <p id="check-count" class="hint"></p>
+              <label for="check-days">Active tab maano jab aakhri post itne din ke andar ho</label>
+              <input id="check-days" type="number" min="1" max="365" step="1" value="30" required>
+              <button id="check-save" class="primary" type="submit">Check shuru karo <span aria-hidden="true">↗</span></button>
+            </form>
+          </div>
+        </details>
         <p id="dm-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak campaign aur list bana sakte ho, bhejna shuru nahi hoga.</p>
         <div id="dm-campaigns" class="jobs"></div>
         <details id="dm-new" class="add-account dm-new">

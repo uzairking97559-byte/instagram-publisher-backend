@@ -1015,7 +1015,7 @@ $("logout").addEventListener("click", async () => {
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
-    dmState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); renderDm();
+    dmState = null; checkState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); renderDm(); renderChecks();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1235,6 +1235,7 @@ async function loadDm() {
   renderDm();
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && $("dm-new").open) void loadDmProfiles();
+  void loadChecks().catch(() => {});
 }
 function renderDm() {
   const list = $("dm-campaigns");
@@ -1248,7 +1249,8 @@ function renderDm() {
 }
 // While a campaign runs, its card refreshes every 20 seconds (only on this tab).
 function updateDmPolling() {
-  const active = !$("dms").hidden && !$("workspace").hidden && Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running"));
+  const active = !$("dms").hidden && !$("workspace").hidden && (Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running")) ||
+    Boolean(checkState?.checks.some((check) => check.status === "running")));
   if (active && !dmPollTimer) {
     dmPollTimer = setInterval(() => {
       if ($("workspace").hidden || $("dms").hidden) { updateDmPolling(); return; }
@@ -1519,6 +1521,120 @@ $("dm-form").addEventListener("submit", async (event) => {
     $("dm-new").open = false;
     updateDmCounts();
     await loadDm();
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+// ---- Creator list check: which usernames still exist and post recently ----
+Object.assign(messages, {
+  invalid_check: "List ka naam (60 akshar tak) aur 1–365 din daalo.",
+  check_not_found: "Ye list check nahi mila. Refresh karo."
+});
+const CHECK_PAUSES = {
+  owner: "Aapne roka hai.",
+  permission_required: "Facebook wali permission chahiye. Upar “Facebook se permission do” dabao, phir Start.",
+  reconnect_required: "Facebook connection ka login expire ho gaya. Upar wale button se dobara connect karo, phir Start.",
+  token_storage_unavailable: "Saved connection padha nahi ja raha. Setup check karna hoga.",
+  too_many_not_found: "Lagatar 40 naam “nahi mile” aaye. Kuch gadbad lagti hai, check ruka hai."
+};
+let checkState = null;
+let checkFileText = "";
+async function loadChecks() {
+  checkState = await api("/api/checks");
+  renderChecks();
+}
+function checkCard(check) {
+  const counts = check.counts;
+  const card = element("article", undefined, "job-card");
+  const head = element("div", undefined, "job-head");
+  const badge = { running: ["CHAL RAHA", "running"], paused: ["RUKA HUA", "paused"], done: ["POORA", "completed"] }[check.status] || [check.status, ""];
+  head.append(element("strong", check.name), element("span", badge[0], `badge ${badge[1]}`));
+  const checked = counts.total - counts.pending;
+  card.append(head, element("p", `Active = aakhri post ${check.active_days} din ke andar`, "job-meta"));
+  const progress = element("section", undefined, "batch-progress");
+  const heading = element("div", undefined, "batch-progress-heading");
+  const hours = check.eta_minutes >= 60 ? `~${Math.round(check.eta_minutes / 60)} ghante baaki` : `~${check.eta_minutes} min baaki`;
+  heading.append(element("strong", `${checked}/${counts.total} check hue`), element("span", check.status === "done" ? "Poora" : hours));
+  const bar = document.createElement("progress");
+  bar.className = "progress-bar"; bar.max = Math.max(1, counts.total); bar.value = checked;
+  progress.append(heading, bar);
+  const stats = element("div", undefined, "stats");
+  for (const [value, label, tone] of [[counts.active, "Active", "good"], [counts.old, "Purane", ""], [counts.not_found, "Nahi mile", counts.not_found ? "bad" : ""], [counts.pending, "Baaki", ""]]) {
+    const stat = element("div", undefined, tone ? `stat ${tone}` : "stat");
+    stat.append(element("strong", String(value)), element("span", label));
+    stats.append(stat);
+  }
+  card.append(progress, stats);
+  if (check.status === "paused" && check.pause_reason) {
+    card.append(element("p", CHECK_PAUSES[check.pause_reason] || "Check ruka hua hai.", check.pause_reason === "owner" ? "" : "batch-error"));
+  }
+  const actions = element("div", undefined, "dm-actions");
+  const button = (text, className, handler) => {
+    const node = element("button", text, className); node.type = "button";
+    node.addEventListener("click", async () => {
+      node.disabled = true;
+      try { await handler(); } catch (error) { explain(error); } finally { node.disabled = false; }
+    });
+    actions.append(node);
+  };
+  const activeNames = async () => (await api(`/api/checks/${check.id}/usernames?filter=active`)).usernames;
+  if (counts.active) {
+    button(`Active (${counts.active}) ko DM campaign mein daalo`, "quiet strong", async () => {
+      const names = await activeNames();
+      $("dm-usernames").value = names.slice(0, 2000).join("\n");
+      $("dm-name").value ||= `${check.name} · active`.slice(0, 60);
+      updateDmCounts();
+      $("dm-new").open = true;
+      $("dm-new").scrollIntoView({ behavior: "smooth", block: "start" });
+      notice(`${Math.min(names.length, 2000)} active creators “Naya DM campaign” mein bhar diye (bade accounts pehle).${names.length > 2000 ? " Ek campaign mein 2,000 tak aate hain; baaki agle campaign mein." : ""} Profile chuno, box tick karo aur Save.`);
+    });
+    button("Active list copy karo", "quiet", async () => {
+      const names = await activeNames();
+      try { await navigator.clipboard.writeText(names.join("\n")); notice(`${names.length} active usernames copy ho gaye.`); }
+      catch { notice("Copy nahi ho paya. “DM campaign mein daalo” wala button use karo.", true); }
+    });
+  }
+  if (check.status === "running") button("Pause", "quiet", async () => { await api(`/api/checks/${check.id}/pause`, { method: "POST", body: "{}" }); await loadChecks(); });
+  else if (counts.pending || counts.errors || check.status === "paused") button("Start", "quiet strong", async () => { await api(`/api/checks/${check.id}/start`, { method: "POST", body: "{}" }); await loadChecks(); });
+  button("Delete", "quiet danger", async () => {
+    if (!confirm(`“${check.name}” list check aur uske results delete karne hain?`)) return;
+    await api(`/api/checks/${check.id}`, { method: "DELETE" }); await loadChecks();
+  });
+  card.append(actions);
+  return card;
+}
+function renderChecks() {
+  const list = $("check-list");
+  list.replaceChildren();
+  if (!checkState) return;
+  $("check-rate").textContent = String(checkState.per_hour);
+  $("check-connect").hidden = checkState.connected;
+  for (const check of checkState.checks) list.append(checkCard(check));
+  if (checkState.checks.some((check) => check.status === "running")) $("check-panel").open = true;
+  updateDmPolling();
+}
+function updateCheckCount() {
+  const text = checkFileText || $("check-text").value;
+  const links = text.match(/instagram\.com\//gi)?.length || 0;
+  const lines = text.split(/\r?\n/).filter((line) => line.trim()).length;
+  $("check-count").textContent = text ? `${lines} lines${links ? ` · ${links} Instagram links` : ""}${checkFileText ? " (file se)" : ""}. Duplicate apne aap hat jayenge.` : "";
+}
+$("check-text").addEventListener("input", () => { checkFileText = ""; $("check-file").value = ""; updateCheckCount(); });
+$("check-file").addEventListener("change", async () => {
+  const file = $("check-file").files?.[0];
+  checkFileText = file ? await file.text().catch(() => "") : "";
+  updateCheckCount();
+});
+$("check-panel").addEventListener("toggle", () => { if ($("check-panel").open && !checkState) void loadChecks().catch(explain); });
+$("check-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("check-save"); button.disabled = true;
+  try {
+    const data = await api("/api/checks", { method: "POST", body: JSON.stringify({
+      name: $("check-name").value.trim(), usernames: checkFileText || $("check-text").value, active_days: Number($("check-days").value)
+    }) });
+    notice(`List check shuru: ${data.added} usernames${data.invalid.length ? `, ${data.invalid.length}+ galat entries chhodi` : ""}. Website ab khud check karti rahegi, page band kar sakte ho.`);
+    $("check-name").value = ""; $("check-text").value = ""; $("check-file").value = ""; checkFileText = ""; updateCheckCount();
+    await loadChecks();
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });
