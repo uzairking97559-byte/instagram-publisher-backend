@@ -69,9 +69,10 @@ if (window.INBOX) {
       const query = input.value.trim().toLowerCase();
       for (const [name, info] of Object.entries(users)) {
         if (!query || !name.startsWith(query)) continue;
-        const row = document.createElement('label');
-        row.innerHTML = '<div>' + info.name + '</div><div>' + name + '</div><input type="checkbox">';
-        row.addEventListener('click', () => { chosen = name; go.setAttribute('aria-disabled', 'false'); });
+        // Like Instagram: the names sit in plain divs, the checkbox in its own empty label.
+        const row = document.createElement('div');
+        row.innerHTML = '<div><div><span>' + info.name + '</span></div><div><span>' + name + '</span></div></div><label><input type="checkbox"></label>';
+        row.querySelector('input').addEventListener('change', () => { chosen = name; go.setAttribute('aria-disabled', 'false'); });
         results.append(row);
       }
     }, 150));
@@ -202,7 +203,9 @@ test("sends from the Direct inbox, loading the inbox page only once", { skip: !C
 
   assert.deepEqual(await send("alice3"), { status: "sent" });
   assert.deepEqual(await send("bob3"), { status: "skipped", reason: "already_in_thread" });
-  assert.deepEqual(await send("carol3"), { status: "skipped", reason: "not_found" }, "no such account in the search");
+  const missing = await send("carol3");
+  assert.deepEqual([missing.status, missing.reason], ["skipped", "not_found"], "no such account in the search");
+  assert.match(missing.detail, /^typed=carol3 text=New message/);
   assert.deepEqual(await send("alice3", "A second short hello for alice3"), { status: "sent" });
   await session.idle();
   assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 1, "the inbox page loads once");
