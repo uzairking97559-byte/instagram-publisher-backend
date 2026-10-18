@@ -1172,7 +1172,7 @@ const DM_REASONS = {
 };
 Object.assign(messages, {
   dm_not_configured: "DM Sender ke liye Browser Use key set nahi hai. Render → Environment mein BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
-  invalid_campaign: "Naam (60 akshar tak), profile, message (1000 akshar tak), roz ki limit 1–200, gap 2–60 minute aur shuru/band ka alag time check karo.",
+  invalid_campaign: "Naam (60 akshar tak), profile, message (har version 1000 akshar tak, 10 versions tak), roz ki limit 1–200, gap 2–60 minute aur shuru/band ka alag time check karo.",
   contact_not_confirmed: "Neeche wala box tick karo: message sirf unhe jayega jinhone khud promotion ke liye comment/request kiya.",
   invalid_usernames: "Koi sahi Instagram username nahi mila. Ek line mein ek username ya profile link daalo.",
   too_many_usernames: "Ek campaign mein 2,000 se zyada creators nahi aa sakte.",
@@ -1413,7 +1413,7 @@ function dmSettingsEditor(campaign) {
   details.append(element("summary", "Message ya speed badlo"));
   const form = element("div", undefined, "frame-form");
   const message = document.createElement("textarea");
-  message.id = `dm-edit-message-${campaign.id}`; message.rows = 5; message.maxLength = 1000; message.value = campaign.message;
+  message.id = `dm-edit-message-${campaign.id}`; message.rows = 5; message.maxLength = 5000; message.value = campaign.message;
   const messageLabel = element("label", "Message"); messageLabel.htmlFor = message.id;
   const limit = document.createElement("input");
   limit.type = "number"; limit.min = "1"; limit.max = "200"; limit.step = "1"; limit.value = String(campaign.daily_limit);
@@ -1473,7 +1473,9 @@ function countEntries(text) {
   return new Set(text.split(/[\s,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean)).size;
 }
 function updateDmCounts() {
-  $("dm-message-count").textContent = `${[...$("dm-message").value].length} / 1000`;
+  const versions = $("dm-message").value.split(/\n[ \t]*-{3,}[ \t]*(?:\n|$)/).map((part) => part.trim()).filter(Boolean);
+  const longest = Math.max(0, ...versions.map((part) => [...part].length));
+  $("dm-message-count").textContent = `${versions.length} version${versions.length === 1 ? "" : "s"} · sabse lamba ${longest}/1000`;
   const entries = countEntries($("dm-usernames").value);
   $("dm-usernames-count").textContent = entries
     ? `${entries} entries · duplicate aur galat entries save karte waqt hat jayengi. Jinhe pehle DM ja chuka hai, unhe dobara nahi jayega.`
