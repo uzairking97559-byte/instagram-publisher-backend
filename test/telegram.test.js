@@ -84,7 +84,13 @@ test("telegram: linked once from the website, then replies come in and answers g
   await say(`/start ${code}`);
   status = (await h.request("/api/telegram", { cookie })).data;
   assert.equal(status.linked, true);
-  assert.match(fake.sent.at(-1).text, /Telegram jud gaya/);
+  assert.match(fake.sent.at(-2).text, /Telegram jud gaya/);
+  // Then the main menu, as buttons; the Menu button beside the box lists the commands.
+  const home = fake.sent.at(-1);
+  assert.equal(home.text, "🏠 Main menu");
+  assert.deepEqual(home.reply_markup.inline_keyboard.flat().map((button) => button.callback_data), ["m:replies", "m:check", "m:aaj", "m:camps", "m:tpl"]);
+  assert.deepEqual(fake.calls.find((call) => call.method === "setMyCommands").body.commands.map((item) => item.command),
+    ["menu", "replies", "check", "aaj", "campaigns", "jawab"]);
   // The code works once.
   await hook({ message: { message_id: 2, chat: { id: 777, type: "private" }, text: `/start ${code}` } });
   assert.match(fake.sent.at(-1).text, /purana ho gaya ya galat/);
@@ -148,6 +154,24 @@ test("telegram: linked once from the website, then replies come in and answers g
   await worker();
   await settle();
   assert.ok(fake.sent.some((message) => /“Commenters”: Test poora hua/.test(message.text)));
+  // Campaigns from the menu: Start asks once more, Pause does not.
+  const press = (data, id) => hook({ callback_query: { id, data, message: { message_id: 4242, chat: { id: OWNER, type: "private" } } } });
+  await press("m:camps", "cb3");
+  const card = fake.sent.at(-1);
+  assert.match(card.text, /^📣 Commenters\n⏸ Ruka hua\nTest poora hua/);
+  assert.deepEqual(card.reply_markup.inline_keyboard[0].map((button) => button.callback_data), [`c:ask:${campaign.id}`]);
+  await press(`c:ask:${campaign.id}`, "cb4");
+  const asked = fake.calls.filter((call) => call.method === "editMessageText").at(-1).body;
+  assert.match(asked.text, /baaki 1 creators ko DM shuru karne hain/);
+  assert.deepEqual(asked.reply_markup.inline_keyboard[0].map((button) => button.callback_data), [`c:go:${campaign.id}`, `c:no:${campaign.id}`]);
+  await press(`c:go:${campaign.id}`, "cb5");
+  assert.equal((await h.request(`/api/dm/campaigns/${campaign.id}`, { cookie })).data.campaign.status, "running");
+  await press(`c:pause:${campaign.id}`, "cb6");
+  assert.equal((await h.request(`/api/dm/campaigns/${campaign.id}`, { cookie })).data.campaign.status, "paused");
+  assert.match(fake.calls.filter((call) => call.method === "editMessageText").at(-1).body.text, /pause ho gaya/);
+  await press("m:replies", "cb7");
+  assert.equal(fake.sent.at(-1).text, "✅ Abhi kisi reply ka jawab baaki nahi hai.");
+
   // The /check asked earlier is answered even when nothing is new.
   assert.ok(fake.sent.some((message) => message.text === "✅ Inbox check ho gaya (@aiglow.artlab): koi naya reply nahi."));
 
