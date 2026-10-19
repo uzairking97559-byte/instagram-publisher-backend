@@ -207,6 +207,8 @@ test("the worker sends one message per gap, stops after a test run and reports t
   assert.equal(detail.campaign.cost.proxy_mb, 2);
   assert.equal(detail.campaign.cost.inr, 1.16);
   assert.equal(detail.campaign.cost.per_dm_inr, 0.58);
+  // Today's numbers for the website's "Aaj" row.
+  assert.deepEqual((await h.request("/api/dm", { cookie })).data.today, { sent: 2, cost_inr: 1.16 });
 
   // Starting again finishes the list; then the campaign completes.
   assert.equal((await start(id)).status, 200);
