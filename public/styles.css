@@ -254,9 +254,7 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
   height: calc(var(--nav-h) + env(safe-area-inset-bottom));
   padding: 0 8px env(safe-area-inset-bottom);
   border-top: 1px solid var(--seam);
-  background: color-mix(in srgb, var(--slate) 94%, transparent);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  background: var(--slate);
 }
 .sections button {
   position: relative;
@@ -685,8 +683,6 @@ footer a { color: var(--marigold-text); }
     padding: 0;
     border: 0;
     background: none;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
   .sections button { flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 46px; padding: 0 14px; border-radius: 12px; font-size: 16px; }
   .sections button:hover { background: var(--slate); color: var(--chalk); }
