@@ -148,6 +148,8 @@ test("telegram: linked once from the website, then replies come in and answers g
   await worker();
   await settle();
   assert.ok(fake.sent.some((message) => /“Commenters”: Test poora hua/.test(message.text)));
+  // The /check asked earlier is answered even when nothing is new.
+  assert.ok(fake.sent.some((message) => message.text === "✅ Inbox check ho gaya (@aiglow.artlab): koi naya reply nahi."));
 
   // The day's summary after 22:00 India time, once.
   clock.now = new Date("2026-10-18T17:00:00.000Z");
