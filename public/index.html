@@ -2,170 +2,198 @@
 <html lang="hi">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0f1419">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#131b2e" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f4f9" media="(prefers-color-scheme: light)">
   <meta name="description" content="Independent publishing tool for Instagram professional accounts. Not affiliated with Meta, Instagram, or Facebook.">
   <meta name="google-site-verification" content="MROBwDCPPAiPYeE0p6GYG6FaPTRaJoPBAk2V28kVHMs">
   <meta name="google-site-verification" content="dV_cktYN1k6J_JSh3nx0MvQTatjW4Int9kUhmnkuxfQ">
   <title>Creator Publishing Tool</title>
+  <link rel="preload" href="/fonts/anek-latin.woff" as="font" type="font/woff" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Creator home"><span class="brand-mark">c</span>creator<span class="brand-dot">.</span></a>
-    <span class="workspace-tag">PUBLISHING WORKSPACE</span>
-    <button id="logout" class="quiet" hidden>Sign out</button>
+    <a class="brand" href="/" aria-label="Creator home"><span class="brand-mark" aria-hidden="true">c</span><span>creator</span></a>
+    <button id="logout" class="quiet small" type="button" hidden>Sign out</button>
   </header>
   <main>
     <aside id="independence" class="independence-notice" aria-label="Service information">
-      <strong>Independent app · Meta se affiliation nahi hai.</strong>
-      <p>Yeh app Meta, Instagram ya Facebook ki official service nahi hai. Dashboard password sirf is app ke liye hai—Instagram/Facebook password yahan mat daalein. Account connect karne par sign-in Meta ke official page par hoga. <a href="/about.html">Service details</a>.</p>
+      <strong>Independent app. Meta se affiliation nahi hai.</strong>
+      <p>Yeh app Meta, Instagram ya Facebook ki official service nahi hai. Dashboard password sirf is app ke liye hai; Instagram/Facebook password yahan mat daalein. Account connect karne par sign-in Meta ke official page par hoga. <a href="/about.html">Service details</a>.</p>
     </aside>
     <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
-    <section id="loading" class="login-panel"><p class="eyebrow">CREATOR PUBLISHING TOOL</p><h1>Workspace khul raha hai…</h1></section>
+    <section id="loading" class="login-panel"><h1>Workspace khul raha hai…</h1></section>
     <section id="setup" class="login-panel" hidden>
-      <p class="eyebrow">SETUP PENDING</p><h1>Secure workspace ki taiyari.</h1>
+      <h1>Setup abhi baaki hai.</h1>
       <p>Database aur private dashboard sign-in configure hone ke baad accounts connect kar sakoge.</p>
-      <button id="setup-retry" class="primary">Dobara check karo</button>
+      <button id="setup-retry" class="primary" type="button">Dobara check karo</button>
     </section>
     <section id="signin" class="login-panel" hidden>
-      <p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Create. Connect.<br><span>Publish with control.</span></h1>
-      <p>Apne connected Instagram professional accounts ko ek jagah manage karo.</p>
+      <h1>Posting, DMs aur creators. Ek jagah.</h1>
+      <p>Apne Instagram professional accounts, DM campaigns aur creator lists yahan se chalao.</p>
       <form id="login-form">
         <label for="password">Private dashboard password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="Apna private dashboard password">
         <p class="hint">Yeh password sirf is independent app ke dashboard ke liye hai. Instagram/Facebook password yahan mat daalein.</p>
-        <button class="primary" id="login-button">Workspace kholo <span aria-hidden="true">↗</span></button>
+        <button class="primary" id="login-button" type="submit">Workspace kholo</button>
       </form>
     </section>
+
     <div id="workspace" hidden>
-      <div class="appbar">
-        <div class="switcher">
-          <span id="switcher-avatar" class="avatar all" aria-hidden="true">∗</span>
-          <span class="switcher-text">
-            <strong id="switcher-name">Sabhi accounts</strong>
-            <span id="switcher-meta">Account chuno</span>
-          </span>
-          <span class="switcher-chevron" aria-hidden="true"></span>
-          <select id="account-filter" aria-label="Account chuno"><option value="all">Sabhi accounts</option></select>
-        </div>
-        <div class="tabs" role="tablist" aria-label="Workspace sections">
-          <button id="tab-connections" type="button" role="tab" aria-controls="connections" aria-selected="true">Accounts</button>
-          <button id="tab-composer" type="button" role="tab" aria-controls="composer" aria-selected="false" tabindex="-1">Create post</button>
-          <button id="tab-activity" type="button" role="tab" aria-controls="activity" aria-selected="false" tabindex="-1">Activity</button>
-          <button id="tab-dms" type="button" role="tab" aria-controls="dms" aria-selected="false" tabindex="-1">DMs</button>
-        </div>
-      </div>
+      <nav class="sections" aria-label="Hisse">
+        <button id="section-posting" type="button" data-section="posting">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3.5"/><path d="M10.2 9.2v5.6l4.6-2.8z"/></svg>
+          <span>Posting</span>
+        </button>
+        <button id="section-messages" type="button" data-section="messages">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11a2.5 2.5 0 0 1 2.5 2.5v7.5a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4a1.5 1.5 0 0 1-1.5-1.5V6a2.5 2.5 0 0 1 2.5-2.5z"/></svg>
+          <span>Messages</span>
+          <span id="messages-badge" class="nav-badge" hidden></span>
+        </button>
+        <button id="section-creators" type="button" data-section="creators">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9.5" cy="7.5" r="3.3"/><path d="M3.5 19.5c.7-3.4 3.1-5.4 6-5.4"/><circle cx="16.4" cy="15.4" r="3"/><path d="m18.6 17.6 2.4 2.4"/></svg>
+          <span>Creators</span>
+        </button>
+      </nav>
 
-      <section id="connections" class="view" role="tabpanel" aria-labelledby="tab-connections">
-        <div class="view-head">
-          <div><h2>Accounts <span id="account-count" class="count">0</span></h2><p id="accounts-scope" class="muted">Kisi account pe tap karo, sirf uski details dikhegi.</p></div>
-          <button id="reload" class="quiet" type="button">Refresh</button>
-        </div>
-        <div id="accounts" class="accounts"></div>
-        <details id="add-account" class="add-account">
-          <summary><span class="plus" aria-hidden="true">+</span>Naya account connect karo</summary>
-          <div class="connect-options">
-            <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram">◎</span><span><strong>Connect with Instagram</strong><small>Official Instagram sign-in · Facebook Page optional</small></span><span aria-hidden="true">↗</span></a>
-            <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook">f</span><span><strong>Connect with Facebook</strong><small>Official Facebook sign-in · Linked professional accounts</small></span><span aria-hidden="true">↗</span></a>
+      <div class="workspace-main">
+        <section class="today" aria-label="Aaj">
+          <button class="today-item" type="button" data-go="campaigns"><strong id="today-dms">–</strong><span>DM aaj gaye</span></button>
+          <button class="today-item" type="button" data-go="replies"><strong id="today-replies">–</strong><span>naye reply</span></button>
+          <button class="today-item" type="button" data-go="activity"><strong id="today-queue">–</strong><span>post line mein</span></button>
+          <button class="today-item" type="button" data-go="campaigns"><strong id="today-cost">–</strong><span>aaj ka kharcha</span></button>
+        </section>
+
+        <div class="subnav-bar">
+          <div id="subnav-posting" class="subnav" role="tablist" aria-label="Posting">
+            <button id="tab-connections" type="button" role="tab" aria-controls="connections" aria-selected="true">Accounts</button>
+            <button id="tab-composer" type="button" role="tab" aria-controls="composer" aria-selected="false" tabindex="-1">Naya post</button>
+            <button id="tab-activity" type="button" role="tab" aria-controls="activity" aria-selected="false" tabindex="-1">Activity</button>
           </div>
-          <p class="hint">Connect button isi website ke andar se dabao. Har account ko Meta app mein Instagram Tester hona chahiye.</p>
-        </details>
-      </section>
+          <div id="subnav-messages" class="subnav" role="tablist" aria-label="Messages" hidden>
+            <button id="tab-replies" type="button" role="tab" aria-controls="replies" aria-selected="false" tabindex="-1">Replies <span id="replies-tab-count" class="tab-count" hidden></span></button>
+            <button id="tab-campaigns" type="button" role="tab" aria-controls="campaigns" aria-selected="false" tabindex="-1">Campaigns</button>
+            <button id="tab-dm-create" type="button" role="tab" aria-controls="dm-create" aria-selected="false" tabindex="-1">Naya campaign</button>
+          </div>
+          <div id="subnav-creators" class="subnav" role="tablist" aria-label="Creators" hidden>
+            <button id="tab-creators" type="button" role="tab" aria-controls="creators" aria-selected="false" tabindex="-1">List check</button>
+          </div>
+          <div id="posting-bar" class="switcher">
+            <span id="switcher-avatar" class="avatar all" aria-hidden="true">∗</span>
+            <span class="switcher-text">
+              <strong id="switcher-name">Sabhi accounts</strong>
+              <span id="switcher-meta">Account chuno</span>
+            </span>
+            <span class="switcher-chevron" aria-hidden="true"></span>
+            <select id="account-filter" aria-label="Account chuno"><option value="all">Sabhi accounts</option></select>
+          </div>
+        </div>
 
-      <section id="composer" class="view" role="tabpanel" aria-labelledby="tab-composer" hidden>
-        <div class="panel">
-          <h2>Create post</h2><p class="muted">Account chuno, videos select karo aur caption ke saath schedule karo.</p>
-          <form id="publish-form">
-            <label for="account">Instagram account</label><select id="account" required><option value="">Pehle account connect karo</option></select>
-            <label for="upload-mode">Publish mode</label>
-            <select id="upload-mode"><option value="batch">Bulk reels · phone se files</option><option value="single">Single post · public link</option></select>
-            <div id="batch-options">
-              <label for="reel-files">Reel videos · ek saath chuno</label>
-              <input id="reel-files" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple>
-              <p id="file-summary" class="hint">1–20 MP4/MOV files. Har file 250 MB tak.</p>
-              <label for="interval-minutes">Har reel ke beech gap</label>
-              <select id="interval-minutes"><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">1 hour</option></select>
-              <p class="hint">Pehli Reel turant process hogi; baaki chune hue gap se. Schedule confirm hone tak page khula rakho; confirm ke baad phone band kar sakte ho.</p>
-              <div class="frame-choice">
-                <label class="check"><input id="frame-enabled" type="checkbox"><span><strong>Frame lagao</strong> · video chhote box mein, peeche background, upar line aur neeche username</span></label>
-                <div id="frame-extra" hidden>
-                  <label for="frame-title">Upar ki line <span class="muted">khaali chhodo, website khud chunegi</span></label>
-                  <input id="frame-title" type="text" maxlength="60" autocomplete="off" placeholder="Jaise: Kadwa sach..!!">
-                  <p id="frame-note" class="hint">Background, box size aur neeche ki photo account ki settings se aayegi: Accounts → account → Frame ka look. Har Reel post hone se thoda pehle edit hogi.</p>
+        <!-- Posting -->
+        <section id="connections" class="view" role="tabpanel" aria-labelledby="tab-connections">
+          <div class="view-head">
+            <div><h2>Accounts <span id="account-count" class="count">0</span></h2><p id="accounts-scope" class="muted">Kisi account pe tap karo, sirf uski details dikhegi.</p></div>
+            <button id="reload" class="quiet small" type="button">Refresh</button>
+          </div>
+          <div id="accounts" class="accounts"></div>
+          <details id="add-account" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Naya account connect karo</summary>
+            <div class="connect-options">
+              <a id="connect-instagram" class="connect-card" href="/auth/instagram/start"><span class="provider-icon instagram" aria-hidden="true">◎</span><span><strong>Connect with Instagram</strong><small>Official Instagram sign-in. Facebook Page optional.</small></span><span class="connect-go" aria-hidden="true">↗</span></a>
+              <a id="connect-facebook" class="connect-card" href="/auth/meta/start"><span class="provider-icon facebook" aria-hidden="true">f</span><span><strong>Connect with Facebook</strong><small>Official Facebook sign-in. Linked professional accounts.</small></span><span class="connect-go" aria-hidden="true">↗</span></a>
+            </div>
+            <p class="hint">Connect button isi website ke andar se dabao. Har account ko Meta app mein Instagram Tester hona chahiye.</p>
+          </details>
+        </section>
+
+        <section id="composer" class="view" role="tabpanel" aria-labelledby="tab-composer" hidden>
+          <div class="view-head">
+            <div><h2>Naya post</h2><p class="muted">Account chuno, videos select karo aur caption ke saath schedule karo.</p></div>
+          </div>
+          <div class="panel">
+            <form id="publish-form">
+              <label for="account">Instagram account</label><select id="account" required><option value="">Pehle account connect karo</option></select>
+              <label for="upload-mode">Publish mode</label>
+              <select id="upload-mode"><option value="batch">Bulk reels · phone se files</option><option value="single">Single post · public link</option></select>
+              <div id="batch-options">
+                <label for="reel-files">Reel videos, ek saath chuno</label>
+                <input id="reel-files" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple>
+                <p id="file-summary" class="hint">1–20 MP4/MOV files. Har file 250 MB tak.</p>
+                <label for="interval-minutes">Har reel ke beech gap</label>
+                <select id="interval-minutes"><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">1 hour</option></select>
+                <p class="hint">Pehli Reel turant process hogi; baaki chune hue gap se. Schedule confirm hone tak page khula rakho; confirm ke baad phone band kar sakte ho.</p>
+                <div class="frame-choice">
+                  <label class="check"><input id="frame-enabled" type="checkbox"><span><strong>Frame lagao.</strong> Video chhote box mein, peeche background, upar line aur neeche username.</span></label>
+                  <div id="frame-extra" hidden>
+                    <label for="frame-title">Upar ki line <span class="muted">khaali chhodo, website khud chunegi</span></label>
+                    <input id="frame-title" type="text" maxlength="60" autocomplete="off" placeholder="Jaise: Kadwa sach..!!">
+                    <p id="frame-note" class="hint">Background, box size aur neeche ki photo account ki settings se aayegi: Accounts → account → Frame ka look. Har Reel post hone se thoda pehle edit hogi.</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div id="single-options" hidden>
-              <label for="media-type">Post type</label><select id="media-type"><option value="image">Photo</option><option value="reel">Reel</option></select>
-              <label for="media-url">Public HTTPS media link</label><input id="media-url" type="url" maxlength="4096" placeholder="https://your-media-site.com/photo.jpg">
-              <p class="hint">Link Meta ko bina login ke khulna chahiye.</p>
-            </div>
-            <label for="caption">Caption <span id="caption-count" class="muted">0 / 2200</span></label><textarea id="caption" rows="4" placeholder="What would you like to share?"></textarea>
-            <div id="caption-default" class="caption-default" hidden>
-              <p id="caption-default-note" class="hint"></p>
-              <div class="frame-buttons"><button id="caption-save-default" class="quiet" type="button" hidden>Ise default caption banao</button><button id="caption-use-default" class="quiet" type="button" hidden>Default caption wapas lao</button></div>
-            </div>
-            <label class="check"><input id="confirm-publish" type="checkbox" required><span id="confirm-label">Maine account aur sab reels check ki hain. Is caption ke saath batch schedule karo.</span></label>
-            <button id="publish-button" class="primary" type="submit">Upload aur schedule batch <span aria-hidden="true">↗</span></button>
-            <p id="publish-progress" class="hint" role="status"></p>
-          </form>
-        </div>
-      </section>
-
-      <section id="activity" class="view" role="tabpanel" aria-labelledby="tab-activity" hidden>
-        <div class="view-head">
-          <div><h2>Activity</h2><p id="activity-scope" class="muted">Sabhi accounts ki history</p></div>
-        </div>
-        <div id="jobs" class="jobs"></div>
-        <div class="activity-note"><strong>A little peace of mind.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
-      </section>
-
-      <section id="dms" class="view" role="tabpanel" aria-labelledby="tab-dms" hidden>
-        <div class="view-head">
-          <div><h2>DM Sender</h2><p class="muted">Jin creators ne promotion ke liye comment kiya, unhe aapke account se ek-ek karke message.</p></div>
-          <button id="dm-reload" class="quiet" type="button">Refresh</button>
-        </div>
-        <section id="replies" class="replies" aria-labelledby="replies-title" hidden>
-          <div class="replies-head">
-            <h3 id="replies-title">Replies</h3>
-            <button id="replies-check" class="quiet strong" type="button">Abhi check karo</button>
-          </div>
-          <div id="replies-accounts" class="reply-tabs" role="tablist" aria-label="Instagram account"></div>
-          <p id="replies-status" class="hint"></p>
-          <div class="reply-filter" role="group" aria-label="Kaunse replies dikhayein">
-            <button type="button" class="reply-chip" data-filter="new" aria-pressed="true">Naye</button>
-            <button type="button" class="reply-chip" data-filter="all" aria-pressed="false">Sab</button>
-          </div>
-          <div id="replies-list" class="jobs"></div>
-        </section>
-        <details id="check-panel" class="add-account dm-new">
-          <summary><span class="plus" aria-hidden="true">+</span>Creator list check · active / purane / nahi mile</summary>
-          <div class="dm-form">
-            <p class="hint">Instagram ki official API se har username check hota hai: account abhi hai ya nahi, followers kitne, aur aakhri post kab ki. Background mein ~<span id="check-rate">180</span> naam per ghanta.</p>
-            <p id="check-connect" class="dm-note" hidden>Iske liye ek account Facebook se, ek extra permission ke saath, connect karna hoga (sirf ek baar). <a id="check-connect-link" class="quiet strong" href="/auth/meta/start?extra=insights">Facebook se permission do ↗</a></p>
-            <div id="check-list" class="jobs"></div>
-            <form id="check-form">
-              <label for="check-name">List ka naam</label>
-              <input id="check-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Comments sheet 6400">
-              <label for="check-file">File (.txt ya .csv) <span class="muted">ya neeche paste karo</span></label>
-              <input id="check-file" type="file" accept=".txt,.csv,text/plain,text/csv">
-              <textarea id="check-text" rows="5" spellcheck="false" autocomplete="off" placeholder="Usernames ya profile links, ek line mein ek"></textarea>
-              <p id="check-count" class="hint"></p>
-              <label for="check-days">Active tab maano jab aakhri post itne din ke andar ho</label>
-              <input id="check-days" type="number" min="1" max="365" step="1" value="30" required>
-              <button id="check-save" class="primary" type="submit">Check shuru karo <span aria-hidden="true">↗</span></button>
+              <div id="single-options" hidden>
+                <label for="media-type">Post type</label><select id="media-type"><option value="image">Photo</option><option value="reel">Reel</option></select>
+                <label for="media-url">Public HTTPS media link</label><input id="media-url" type="url" maxlength="4096" placeholder="https://your-media-site.com/photo.jpg">
+                <p class="hint">Link Meta ko bina login ke khulna chahiye.</p>
+              </div>
+              <label for="caption">Caption <span id="caption-count" class="muted">0 / 2200</span></label><textarea id="caption" rows="4" placeholder="Caption likho"></textarea>
+              <div id="caption-default" class="caption-default" hidden>
+                <p id="caption-default-note" class="hint"></p>
+                <div class="frame-buttons"><button id="caption-save-default" class="quiet" type="button" hidden>Ise default caption banao</button><button id="caption-use-default" class="quiet" type="button" hidden>Default caption wapas lao</button></div>
+              </div>
+              <label class="check"><input id="confirm-publish" type="checkbox" required><span id="confirm-label">Maine account aur sab reels check ki hain. Is caption ke saath batch schedule karo.</span></label>
+              <button id="publish-button" class="primary" type="submit">Upload aur schedule batch</button>
+              <p id="publish-progress" class="hint" role="status"></p>
             </form>
           </div>
-        </details>
-        <p id="dm-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak campaign aur list bana sakte ho, bhejna shuru nahi hoga.</p>
-        <div id="dm-campaigns" class="jobs"></div>
-        <details id="dm-new" class="add-account dm-new">
-          <summary><span class="plus" aria-hidden="true">+</span>Naya DM campaign</summary>
-          <form id="dm-form" class="dm-form">
+        </section>
+
+        <section id="activity" class="view" role="tabpanel" aria-labelledby="tab-activity" hidden>
+          <div class="view-head">
+            <div><h2>Activity</h2><p id="activity-scope" class="muted">Sabhi accounts ki history</p></div>
+          </div>
+          <div id="jobs" class="jobs"></div>
+          <div class="side-note"><strong>Duplicate se bachne ke liye.</strong><p>Agar Meta ka response clear na ho, pehle Instagram check karo. Same post dobara submit karne se duplicate ho sakti hai.</p></div>
+        </section>
+
+        <!-- Messages -->
+        <section id="replies" class="view" role="tabpanel" aria-labelledby="tab-replies" hidden>
+          <div class="view-head">
+            <div><h2>Replies</h2><p class="muted">Jinhone DM ka jawab diya. Yahin se jawab likho, usi account se chala jayega.</p></div>
+            <button id="replies-check" class="quiet strong small" type="button">Abhi check karo</button>
+          </div>
+          <p id="replies-empty" class="empty" hidden>Pehle ek DM campaign chalao. Jinhe DM gaya, unke reply yahan dikhenge.</p>
+          <div id="replies-body" hidden>
+            <div id="replies-accounts" class="reply-tabs" role="tablist" aria-label="Instagram account"></div>
+            <p id="replies-status" class="hint"></p>
+            <div class="reply-filter" role="group" aria-label="Kaunse replies dikhayein">
+              <button type="button" class="reply-chip" data-filter="new" aria-pressed="true">Naye</button>
+              <button type="button" class="reply-chip" data-filter="all" aria-pressed="false">Sab</button>
+            </div>
+            <div id="replies-list" class="jobs"></div>
+          </div>
+        </section>
+
+        <section id="campaigns" class="view" role="tabpanel" aria-labelledby="tab-campaigns" hidden>
+          <div class="view-head">
+            <div><h2>DM campaigns</h2><p class="muted">Jin creators ne promotion ke liye comment kiya, unhe aapke account se ek-ek karke message.</p></div>
+            <button id="dm-reload" class="quiet small" type="button">Refresh</button>
+          </div>
+          <p id="dm-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak campaign aur list bana sakte ho, bhejna shuru nahi hoga.</p>
+          <div id="dm-campaigns" class="jobs"></div>
+          <button id="dm-new-open" class="quiet wide" type="button"><span class="plus" aria-hidden="true">+</span>Naya DM campaign banao</button>
+          <div class="side-note"><strong>Account ki safety.</strong><p>Har DM ke beech gap rehta hai aur sirf chune hue ghanton mein DM jaate hain. Instagram koi warning de, logout kare ya security check maange to campaign apne aap ruk jayega; Instagram app mein check karke hi dobara Start karo.</p></div>
+        </section>
+
+        <section id="dm-create" class="view" role="tabpanel" aria-labelledby="tab-dm-create" hidden>
+          <div class="view-head">
+            <div><h2>Naya DM campaign</h2><p class="muted">Save karne se bhejna shuru nahi hota. Card pe pehle “Pehle 5 (test)” chalao, phir baaki ke liye Start.</p></div>
+          </div>
+          <form id="dm-form" class="panel dm-form">
             <label for="dm-name">Campaign ka naam</label>
-            <input id="dm-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Reel comments · list 1">
+            <input id="dm-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Reel comments, list 1">
             <label for="dm-profile">Kis Instagram account se (Browser Use profile)</label>
             <select id="dm-profile" required><option value="">Profiles load ho rahi hain…</option></select>
             <div id="dm-profile-manual" hidden>
@@ -176,7 +204,7 @@
             <label for="dm-message">Message <span id="dm-message-count" class="muted">1 version</span></label>
             <textarea id="dm-message" rows="6" maxlength="5000" required></textarea>
             <p class="hint"><strong>{username}</strong> likho to wahan har creator ka naam aayega (jaise “Hi {username}”). Kai versions: har version ke beech ek alag line mein <strong>---</strong> likho; har DM mein ek version jayega.</p>
-            <label for="dm-usernames">Creators · ek line mein ek username ya profile link</label>
+            <label for="dm-usernames">Creators, ek line mein ek username ya profile link</label>
             <textarea id="dm-usernames" rows="7" required spellcheck="false" autocomplete="off" placeholder="shobhajee1&#10;@daily_jokes7738&#10;https://www.instagram.com/shinchan_edits.01/"></textarea>
             <p id="dm-usernames-count" class="hint">Duplicate apne aap hat jayenge. Jinhe pehle kisi campaign se message ja chuka hai, unhe dobara nahi jayega.</p>
             <div class="dm-fields">
@@ -193,14 +221,35 @@
             </select>
             <p id="dm-proxy-note" class="hint"></p>
             <label class="check"><input id="dm-consent" type="checkbox" required><span>Is list ke sab creators ne promotion details ke liye khud comment/request kiya hai.</span></label>
-            <button id="dm-save" class="primary" type="submit">Campaign save karo <span aria-hidden="true">↗</span></button>
-            <p class="hint">Save karne se bhejna shuru nahi hota. Card pe pehle “5 ka test” chalao, Instagram mein check karo, phir baaki ke liye Start.</p>
+            <button id="dm-save" class="primary" type="submit">Campaign save karo</button>
           </form>
-        </details>
-        <div class="activity-note"><strong>Account ki safety.</strong><p>Har DM ke beech gap rehta hai aur sirf chune hue ghanton mein DM jaate hain. Instagram koi warning de, logout kare ya security check maange to campaign apne aap ruk jayega; Instagram app mein check karke hi dobara Start karo. Kharcha ₹ mein card pe dikhta hai.</p></div>
-      </section>
+        </section>
 
-      <footer><span>Creator Publishing Tool</span><span>Independent service · Meta se affiliated nahi · <a href="/about.html">Service details</a></span></footer>
+        <!-- Creators -->
+        <section id="creators" class="view" role="tabpanel" aria-labelledby="tab-creators" hidden>
+          <div class="view-head">
+            <div><h2>Creator list check</h2><p class="muted">Kaun se accounts abhi bhi hain, aur kisne haal mein post kiya. Instagram ki official API se, background mein ~<span id="check-rate">180</span> naam per ghanta.</p></div>
+          </div>
+          <p id="check-connect" class="dm-note" hidden>Iske liye ek account Facebook se, ek extra permission ke saath, connect karna hoga (sirf ek baar). <a id="check-connect-link" class="quiet strong small" href="/auth/meta/start?extra=insights">Facebook se permission do</a></p>
+          <div id="check-list" class="jobs"></div>
+          <details id="check-new" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Nayi list check karo</summary>
+            <form id="check-form" class="dm-form">
+              <label for="check-name">List ka naam</label>
+              <input id="check-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Comments sheet 6400">
+              <label for="check-file">File (.txt ya .csv) <span class="muted">ya neeche paste karo</span></label>
+              <input id="check-file" type="file" accept=".txt,.csv,text/plain,text/csv">
+              <textarea id="check-text" rows="5" spellcheck="false" autocomplete="off" placeholder="Usernames ya profile links, ek line mein ek"></textarea>
+              <p id="check-count" class="hint"></p>
+              <label for="check-days">Active tab maano jab aakhri post itne din ke andar ho</label>
+              <input id="check-days" type="number" min="1" max="365" step="1" value="30" required>
+              <button id="check-save" class="primary" type="submit">Check shuru karo</button>
+            </form>
+          </details>
+        </section>
+
+        <footer><span>Creator Publishing Tool</span><span>Independent service. Meta se affiliated nahi. <a href="/about.html">Service details</a></span></footer>
+      </div>
     </div>
   </main>
 </body>

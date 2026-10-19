@@ -68,7 +68,19 @@ let storage = null;
 // The account picked in the switcher ("all" for every account). Accounts,
 // Create post and Activity all follow it. Remembered per browser only.
 const ALL_ACCOUNTS = "all";
-const VIEWS = ["connections", "composer", "activity", "dms"];
+// Three parts, each with its own pages: the bottom bar (left rail on a computer)
+// picks the part, the tabs under "Aaj" pick the page.
+const SECTIONS = { posting: ["connections", "composer", "activity"], messages: ["replies", "campaigns", "dm-create"], creators: ["creators"] };
+const VIEWS = Object.values(SECTIONS).flat();
+const sectionOf = (view) => Object.keys(SECTIONS).find((key) => SECTIONS[key].includes(view));
+// The page last open in each part, so going back to a part returns to it.
+const lastView = (() => {
+  const saved = { posting: "connections", messages: "replies", creators: "creators" };
+  try { Object.assign(saved, JSON.parse(readSetting("publisher-last-views") || "{}")); } catch { /* ignore */ }
+  for (const key of Object.keys(SECTIONS)) if (!SECTIONS[key].includes(saved[key])) saved[key] = SECTIONS[key][0];
+  return saved;
+})();
+let currentView = null;
 let selectedAccount = /^\d{1,18}$/.test(readSetting("publisher-selected-account") || "") ? readSetting("publisher-selected-account") : ALL_ACCOUNTS;
 let accountsLoaded = false;
 let jobsScope = null;
@@ -127,20 +139,57 @@ function avatar(name, className = "avatar") {
 function showSignedOut() {
   $("workspace").hidden = true; $("signin").hidden = false; $("logout").hidden = true; $("independence").hidden = false;
 }
+// Old saved pages: "dms" was one page for campaigns, list checks and replies.
+function knownView(name) { return VIEWS.includes(name) ? name : name === "dms" ? "campaigns" : "connections"; }
 function showView(name) {
-  if (!VIEWS.includes(name)) name = "connections";
+  name = knownView(name);
+  const section = sectionOf(name);
   for (const view of VIEWS) {
     const active = view === name;
     $(view).hidden = !active;
     $(`tab-${view}`).setAttribute("aria-selected", String(active));
     $(`tab-${view}`).tabIndex = active ? 0 : -1;
   }
+  for (const key of Object.keys(SECTIONS)) {
+    $(`subnav-${key}`).hidden = key !== section;
+    if (key === section) $(`section-${key}`).setAttribute("aria-current", "page"); else $(`section-${key}`).removeAttribute("aria-current");
+  }
+  // A part with one page needs no tab row.
+  $(`subnav-${section}`).hidden = SECTIONS[section].length < 2;
+  $("posting-bar").hidden = section !== "posting";
+  currentView = name;
+  lastView[section] = name;
+  writeSetting("publisher-last-views", JSON.stringify(lastView));
   writeSetting("publisher-view", name);
   if (location.hash !== `#${name}`) history.replaceState(null, "", `${location.pathname}#${name}`);
-  if (name === "dms") void loadDm().catch(explain); else updateDmPolling();
-  // Keep the account bar pinned and start the new view from its top.
+  if (section !== "posting") void loadDm().catch(explain); else updateDmPolling();
+  if (name === "dm-create" && dmState?.configured && !dmProfilesLoaded) void loadDmProfiles();
+  // Start the new page from its top, keeping today's numbers in view.
   const top = $("workspace").getBoundingClientRect().top + window.scrollY;
   if (!$("workspace").hidden && window.scrollY > top) window.scrollTo({ top });
+}
+function showSection(section) { showView(lastView[section]); }
+// Fits the narrow "Aaj" row: ₹7.4, ₹38, ₹1.2k.
+function shortRupees(value) {
+  const amount = Number(value || 0);
+  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (amount >= 100) return `₹${Math.round(amount)}`;
+  return `₹${(Math.round(amount * 10) / 10).toString()}`;
+}
+// Today: DMs sent, new replies, Reels waiting to post, and today's spend.
+function renderToday() {
+  const sentToday = dmState?.today?.sent ?? dmState?.campaigns.reduce((sum, campaign) => sum + campaign.counts.sent_today, 0);
+  const fresh = replyState ? replyState.accounts.reduce((sum, item) => sum + item.new, 0) : null;
+  const queued = accountsLoaded ? progress.reduce((sum, row) => sum + (row.scheduled_count || 0), 0) : null;
+  $("today-dms").textContent = sentToday ?? "–";
+  $("today-replies").textContent = fresh ?? "–";
+  $("today-replies").parentElement.classList.toggle("alert", Boolean(fresh));
+  $("today-queue").textContent = queued ?? "–";
+  $("today-cost").textContent = dmState?.today ? shortRupees(dmState.today.cost_inr) : "–";
+  $("messages-badge").hidden = !fresh;
+  $("messages-badge").textContent = fresh ? String(fresh) : "";
+  $("replies-tab-count").hidden = !fresh;
+  $("replies-tab-count").textContent = fresh ? String(fresh) : "";
 }
 function selectAccount(id) {
   const next = accounts.some((account) => account.connection_id === id) ? id : ALL_ACCOUNTS;
@@ -647,7 +696,7 @@ function renderJobs() {
       ? `@${accountName(account)} ki abhi koi history nahi. Create post se pehli batch banao.`
       : "Your next idea starts here. Publish requests yahan dikhengi.", "empty"));
   }
-  const names = { queued: "QUEUED", creating: "CREATING", processing: "PROCESSING", publishing: "CONFIRMING", published: "PUBLISHED", failed: "FAILED", unknown: "CHECK NEEDED", cancelled: "CANCELLED" };
+  const names = { queued: "Line mein", creating: "Ban rahi", processing: "Process", publishing: "Confirm ho rahi", published: "Post ho gayi", failed: "Failed", unknown: "Check karo", cancelled: "Cancel" };
   const batches = new Map();
   const singles = [];
   for (const job of visible) {
@@ -812,9 +861,11 @@ async function refresh() {
   accounts = accountData.accounts; progress = progressData.progress; accountsLoaded = true;
   if (scope === selectedAccount) { jobs = jobData.jobs; jobsScope = scope; }
   storage = storageData?.storage || null;
-  renderAccounts(); renderJobs(); updateFileSummary();
+  renderAccounts(); renderJobs(); updateFileSummary(); renderToday();
   clearTemporaryUnavailable();
   updatePolling();
+  // Today's DM numbers and new replies, even while on Posting (at most once a minute).
+  if (!dmState || Date.now() - dmLoadedAt > 60000) void loadDm().catch(() => {});
   // The picked account changed meanwhile, or was disconnected (now all accounts).
   if (jobsScope !== selectedAccount) await loadJobs();
 }
@@ -895,7 +946,7 @@ function updatePublishMode() {
   $("confirm-label").textContent = batch
     ? "Maine account aur sab reels check ki hain. Ek caption ke saath batch schedule karo."
     : "Maine account aur content check kiya hai. Is post ko ab publish karna hai.";
-  $("publish-button").firstChild.textContent = batch ? "Upload aur schedule batch " : "Publish post ";
+  $("publish-button").firstChild.textContent = batch ? "Upload aur schedule batch" : "Post publish karo";
 }
 // Videos over 45 MB go in 4 MB parts, so a big file never sits in the
 // server's memory and a dropped connection only resends the missing parts.
@@ -1016,7 +1067,7 @@ $("logout").addEventListener("click", async () => {
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
-    renderDm(); renderChecks(); renderReplies();
+    renderDm(); renderChecks(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1025,17 +1076,21 @@ $("setup-retry").addEventListener("click", () => boot());
 $("account-filter").addEventListener("change", () => selectAccount($("account-filter").value));
 $("account").addEventListener("change", () => { if ($("account").value) selectAccount($("account").value); });
 for (const view of VIEWS) $(`tab-${view}`).addEventListener("click", () => showView(view));
-document.querySelector(".tabs").addEventListener("keydown", (event) => {
-  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-  const current = VIEWS.findIndex((view) => $(`tab-${view}`).getAttribute("aria-selected") === "true");
-  const next = event.key === "Home" ? 0 : event.key === "End" ? VIEWS.length - 1
-    : (current + (event.key === "ArrowRight" ? 1 : VIEWS.length - 1)) % VIEWS.length;
-  event.preventDefault();
-  showView(VIEWS[next]); $(`tab-${VIEWS[next]}`).focus();
-});
+for (const [section, views] of Object.entries(SECTIONS)) {
+  $(`section-${section}`).addEventListener("click", () => showSection(section));
+  $(`subnav-${section}`).addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const current = Math.max(0, views.indexOf(currentView));
+    const next = event.key === "Home" ? 0 : event.key === "End" ? views.length - 1
+      : (current + (event.key === "ArrowRight" ? 1 : views.length - 1)) % views.length;
+    event.preventDefault();
+    showView(views[next]); $(`tab-${views[next]}`).focus();
+  });
+}
+for (const item of document.querySelectorAll(".today-item")) item.addEventListener("click", () => showView(item.dataset.go));
 window.addEventListener("hashchange", () => {
   const view = location.hash.slice(1);
-  if (VIEWS.includes(view) && !$("workspace").hidden) showView(view);
+  if ((VIEWS.includes(view) || view === "dms") && !$("workspace").hidden) showView(view);
 });
 $("caption").addEventListener("input", (event) => {
   if (event.isTrusted) {
@@ -1143,8 +1198,8 @@ $("publish-form").addEventListener("submit", async (event) => {
 const DM_DEFAULT_MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views 💸 Weekly Payments 🚀 No Earning Limit 🎬 Keep Posting Your Regular Reels 📱 Multiple Instagram Pages Allowed Simply add our promotional logo to your Reels and earn based on your eligible views. We also have a dedicated bot for Reel submissions and view tracking. Interested? Reply YES and I'll share the details!";
 const DM_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DM_GAPS = [3, 5, 7, 9, 10, 12, 15, 20, 30, 45, 60];
-const DM_BADGES = { running: "CHAL RAHA", paused: "RUKA HUA", completed: "POORA" };
-const DM_TARGET_BADGES = { pending: "BAAKI", sending: "BHEJ RAHA", sent: "BHEJA", skipped: "SKIP", failed: "FAILED" };
+const DM_BADGES = { running: "Chal raha", paused: "Ruka hua", completed: "Poora" };
+const DM_TARGET_BADGES = { pending: "Baaki", sending: "Bhej raha", sent: "Bheja", skipped: "Skip", failed: "Failed" };
 const DM_PAUSES = {
   not_started: "Abhi shuru nahi hua. Pehle “Pehle 5 (test)” chunkar Start dabao.",
   owner: "Aapne pause kiya hai.",
@@ -1194,6 +1249,7 @@ Object.assign(messages, {
   profile_not_found: "Ye account nahi mila. Refresh karo."
 });
 let dmState = null;
+let dmLoadedAt = 0;
 let dmLoading = null;
 let dmPollTimer = null;
 let dmProfilesLoaded = false;
@@ -1236,32 +1292,34 @@ function fillSelect(target, source) {
 async function loadDm() {
   dmLoading ||= api("/api/dm").finally(() => { dmLoading = null; });
   dmState = await dmLoading;
+  dmLoadedAt = Date.now();
   const latest = dmState.campaigns[0];
   if (!dmMessageTouched) { $("dm-message").value = latest?.message || DM_DEFAULT_MESSAGE; updateDmCounts(); }
   renderDm();
   clearTemporaryUnavailable();
-  if (dmState.configured && !dmProfilesLoaded && $("dm-new").open) void loadDmProfiles();
+  if (dmState.configured && !dmProfilesLoaded && currentView === "dm-create") void loadDmProfiles();
   void loadChecks().catch(() => {});
   void loadReplies().catch(() => {});
 }
 function renderDm() {
+  renderToday();
   const list = $("dm-campaigns");
   list.replaceChildren();
   $("dm-setup").hidden = !dmState || dmState.configured;
   if (dmState) {
-    if (!dmState.campaigns.length) list.append(element("p", "Abhi koi campaign nahi hai. Neeche “Naya DM campaign” kholo.", "empty"));
+    if (!dmState.campaigns.length) list.append(element("p", "Abhi koi campaign nahi hai. Neeche “Naya DM campaign banao” dabao.", "empty"));
     for (const campaign of dmState.campaigns) list.append(dmCard(campaign));
   }
   updateDmPolling();
 }
 // While a campaign runs, its card refreshes every 20 seconds (only on this tab).
 function updateDmPolling() {
-  const active = !$("dms").hidden && !$("workspace").hidden && (Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running")) ||
+  const active = sectionOf(currentView) !== "posting" && !$("workspace").hidden && (Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running")) ||
     Boolean(checkState?.checks.some((check) => check.status === "running")) ||
     Boolean(replyState?.accounts.some((account) => account.checking || account.answering)));
   if (active && !dmPollTimer) {
     dmPollTimer = setInterval(() => {
-      if ($("workspace").hidden || $("dms").hidden) { updateDmPolling(); return; }
+      if ($("workspace").hidden || sectionOf(currentView) === "posting") { updateDmPolling(); return; }
       // Don't redraw the cards while the owner is typing in one of them.
       const focused = document.activeElement;
       if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused)) && focused.matches("input, textarea, select")) return;
@@ -1320,7 +1378,7 @@ function dmCard(campaign) {
 
   const actions = element("div", undefined, "dm-actions");
   if (campaign.status === "running") {
-    const pause = element("button", "Pause karo", "quiet strong"); pause.type = "button";
+    const pause = element("button", "Pause karo", "quiet"); pause.type = "button";
     pause.addEventListener("click", () => dmAction(pause, `/api/dm/campaigns/${campaign.id}/pause`, {},
       () => notice("Campaign pause ho gaya. Jo DM is waqt ja raha tha, wo poora ho sakta hai.")));
     actions.append(pause);
@@ -1458,7 +1516,7 @@ let replyState = null;
 let replyAccount = null;
 let replyFilter = "new";
 const replyDrafts = new Map();
-const REPLY_BADGES = { new: "NAYA", answered: "JAWAB GAYA", done: "HO GAYA" };
+const REPLY_BADGES = { new: "Naya", answered: "Jawab gaya", done: "Ho gaya" };
 const REPLY_CHECK_PROBLEMS = {
   check_failed: "Pichhla check poora nahi hua. Dobara “Abhi check karo” dabao.",
   browser_connect_failed: "Browser se connection nahi bana. Thodi der baad “Abhi check karo” dabao.",
@@ -1476,9 +1534,12 @@ async function loadReplies() {
   updateDmPolling();
 }
 function renderReplies() {
-  const section = $("replies");
-  section.hidden = !replyState || !replyState.accounts.length;
-  if (section.hidden) return;
+  renderToday();
+  const ready = Boolean(replyState && replyState.accounts.length);
+  $("replies-body").hidden = !ready;
+  $("replies-empty").hidden = !replyState || ready;
+  $("replies-check").hidden = !ready;
+  if (!ready) return;
   const accounts = replyState.accounts;
   if (!accounts.some((item) => item.profile_id === replyAccount)) {
     const stored = readStoredAccount();
@@ -1508,8 +1569,8 @@ function renderReplies() {
     bad = true;
   }
   if (current.answering) parts.push(`${current.answering} jawab bhej rahe hain…`);
-  if (current.cost_inr) parts.push(`Replies ka kharcha: ${rupees(current.cost_inr)}.`);
-  if (!current.checking) parts.push("DM chalte waqt har 30 minute mein apne aap check hota hai; alag se check karne par ~₹2 lagte hain.");
+  if (current.cost_inr) parts.push(`Alag checks ka kharcha ${rupees(current.cost_inr)}.`);
+  if (!current.checking && !current.checked_at) parts.push("DM chalte waqt har 30 minute mein apne aap check hota hai; abhi check karne par ~₹2 lagte hain.");
   $("replies-status").textContent = parts.join(" ");
   $("replies-status").classList.toggle("bad", bad);
   $("replies-check").disabled = current.checking || !replyState.configured;
@@ -1652,7 +1713,7 @@ $("dm-profile").addEventListener("change", updateDmProfile);
 const showDmProxyNote = () => { $("dm-proxy-note").textContent = DM_PROXY_NOTES[$("dm-proxy").value] || ""; };
 $("dm-proxy").addEventListener("change", showDmProxyNote);
 showDmProxyNote();
-$("dm-new").addEventListener("toggle", () => { if ($("dm-new").open && !dmProfilesLoaded) void loadDmProfiles(); });
+$("dm-new-open").addEventListener("click", () => showView("dm-create"));
 $("dm-reload").addEventListener("click", () => { dmProfilesLoaded = false; loadDm().catch(explain); });
 $("dm-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1674,8 +1735,8 @@ $("dm-form").addEventListener("submit", async (event) => {
     if (data.invalid.length) parts.push(`${data.invalid.length} galat entries chhodi: ${data.invalid.slice(0, 5).join(", ")}`);
     notice(`Campaign save ho gaya: ${parts.join(" · ")}. Ab card pe “Pehle 5 (test)” chunkar Start dabao.`);
     $("dm-name").value = ""; $("dm-usernames").value = ""; $("dm-consent").checked = false;
-    $("dm-new").open = false;
     updateDmCounts();
+    showView("campaigns");
     await loadDm();
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
@@ -1702,7 +1763,7 @@ function checkCard(check) {
   const counts = check.counts;
   const card = element("article", undefined, "job-card");
   const head = element("div", undefined, "job-head");
-  const badge = { running: ["CHAL RAHA", "running"], paused: ["RUKA HUA", "paused"], done: ["POORA", "completed"] }[check.status] || [check.status, ""];
+  const badge = { running: ["Chal raha", "running"], paused: ["Ruka hua", "paused"], done: ["Poora", "completed"] }[check.status] || [check.status, ""];
   head.append(element("strong", check.name), element("span", badge[0], `badge ${badge[1]}`));
   const checked = counts.total - counts.pending;
   card.append(head, element("p", `Active = aakhri post ${check.active_days} din ke andar`, "job-meta"));
@@ -1739,9 +1800,8 @@ function checkCard(check) {
       $("dm-usernames").value = names.slice(0, 2000).join("\n");
       $("dm-name").value ||= `${check.name} · active`.slice(0, 60);
       updateDmCounts();
-      $("dm-new").open = true;
-      $("dm-new").scrollIntoView({ behavior: "smooth", block: "start" });
-      notice(`${Math.min(names.length, 2000)} active creators “Naya DM campaign” mein bhar diye (bade accounts pehle).${names.length > 2000 ? " Ek campaign mein 2,000 tak aate hain; baaki agle campaign mein." : ""} Profile chuno, box tick karo aur Save.`);
+      showView("dm-create");
+      notice(`${Math.min(names.length, 2000)} active creators “Naya campaign” mein bhar diye (bade accounts pehle).${names.length > 2000 ? " Ek campaign mein 2,000 tak aate hain; baaki agle campaign mein." : ""} Profile chuno, box tick karo aur Save.`);
     });
     button("Active list copy karo", "quiet", async () => {
       const names = await activeNames();
@@ -1765,7 +1825,8 @@ function renderChecks() {
   $("check-rate").textContent = String(checkState.per_hour);
   $("check-connect").hidden = checkState.connected;
   for (const check of checkState.checks) list.append(checkCard(check));
-  if (checkState.checks.some((check) => check.status === "running")) $("check-panel").open = true;
+  // With no list yet, the form is the first thing to fill.
+  if (!checkState.checks.length) $("check-new").open = true;
   updateDmPolling();
 }
 function updateCheckCount() {
@@ -1780,7 +1841,6 @@ $("check-file").addEventListener("change", async () => {
   checkFileText = file ? await file.text().catch(() => "") : "";
   updateCheckCount();
 });
-$("check-panel").addEventListener("toggle", () => { if ($("check-panel").open && !checkState) void loadChecks().catch(explain); });
 $("check-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("check-save"); button.disabled = true;
@@ -1801,5 +1861,5 @@ if (location.search) history.replaceState(null, "", location.pathname + location
 // connecting an account, open Accounts so the result is visible.
 const hashView = location.hash.slice(1);
 const startView = status && (status.startsWith("connection") || ["connected", "no_accounts"].includes(status)) ? "connections"
-  : VIEWS.includes(hashView) ? hashView : readSetting("publisher-view") || "connections";
+  : VIEWS.includes(hashView) || hashView === "dms" ? hashView : readSetting("publisher-view") || "connections";
 void boot();
