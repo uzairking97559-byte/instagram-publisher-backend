@@ -15,7 +15,7 @@ const { createInstagramDriver } = require("../lib/instagram-dm");
 
 const CHROME = process.env.DM_TEST_CHROME;
 const MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views. Interested? Reply YES and I'll share the details!";
-const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, poll: 100 };
+const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, dialog: 1000, poll: 100 };
 
 function page(body) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<script>${SCRIPT}</script></body></html>`;
@@ -56,12 +56,21 @@ for (const button of document.querySelectorAll('[data-dismiss]')) button.addEven
 if (window.PRE_OPEN) openChat(window.PRE_OPEN, []);
 // INBOX: a Direct inbox whose "New message" dialog searches these users, and
 // whose Chat button opens the chat in place (the address changes, no reload).
+// Pressing New message again while its window is still loading cancels it.
+// INBOX_MODE "dead": the icon does nothing; "slow": the window takes 700 ms
+// and its search box has no name.
 if (window.INBOX) {
-  const users = window.INBOX;
-  document.querySelector('[data-compose]').addEventListener('click', () => setTimeout(() => {
+  const users = window.INBOX, mode = window.INBOX_MODE || 'ok';
+  let loading = null;
+  document.querySelector('[data-compose]').addEventListener('click', () => {
+    if (mode === 'dead') return;
+    if (loading) { clearTimeout(loading); loading = null; return; }
+    loading = setTimeout(() => { loading = null; showDialog(); }, mode === 'slow' ? 700 : 100);
+  });
+  const showDialog = () => {
     const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
-    dialog.innerHTML = '<div>New message</div><div>To:</div><input name="queryBox" placeholder="Search..."><div class="results"></div>' +
-      '<div role="button" aria-disabled="true" class="go">Chat</div><div role="button" class="x"><svg aria-label="Close" width="10" height="10"></svg></div>';
+    dialog.innerHTML = '<div>New message</div><div>To:</div>' + (mode === 'slow' ? '<input placeholder="Search...">' : '<input name="queryBox" placeholder="Search...">') +
+      '<div class="results"></div><div role="button" aria-disabled="true" class="go">Chat</div><div role="button" class="x"><svg aria-label="Close" width="10" height="10"></svg></div>';
     const input = dialog.querySelector('input'), results = dialog.querySelector('.results'), go = dialog.querySelector('.go');
     let chosen = null;
     input.addEventListener('input', () => setTimeout(() => {
@@ -85,7 +94,7 @@ if (window.INBOX) {
     });
     dialog.querySelector('.x').addEventListener('click', () => dialog.remove());
     document.body.append(dialog);
-  }, 100));
+  };
 }
 `;
 function profile(user, { button = true, extra = "", setup = "" } = {}) {
@@ -94,7 +103,7 @@ function profile(user, { button = true, extra = "", setup = "" } = {}) {
     <img src="/picture.png" alt="">${extra}`);
 }
 
-function site(requests) {
+function site(requests, inbox = "ok") {
   const pages = {
     "/alice/": profile("alice", {
       extra: `<div role="dialog"><p>Turn on notifications</p><button data-dismiss>Not Now</button></div>
@@ -110,7 +119,8 @@ function site(requests) {
     "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
     "/vanish/": profile("vanish", { setup: "window.VANISH = true;" }),
     "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>'),
-    "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] } })};</script>` +
+    "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] } })};` +
+      `window.INBOX_MODE = ${JSON.stringify(inbox)};</script>` +
       '<nav><div role="button" tabindex="0" data-compose><svg aria-label="New message" role="img" width="24" height="24"></svg></div></nav><img src="/picture.png" alt="">')
   };
   return http.createServer((req, res) => {
@@ -210,4 +220,42 @@ test("sends from the Direct inbox, loading the inbox page only once", { skip: !C
   await session.idle();
   assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 1, "the inbox page loads once");
   assert.equal(requests.includes("/picture.png"), false);
+});
+
+async function serve(t, inbox) {
+  const requests = [];
+  const server = site(requests, inbox);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  return { requests, baseUrl: `http://127.0.0.1:${server.address().port}` };
+}
+
+test("inbox: waits for a slow New message window and finds a search box with another name", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { baseUrl } = await serve(t, "slow");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+
+  assert.deepEqual(await session.sendDm({ username: "alice3", message: MESSAGE }), { status: "sent" });
+  const missing = await session.sendDm({ username: "carol3", message: MESSAGE });
+  assert.deepEqual([missing.status, missing.reason], ["skipped", "not_found"]);
+  assert.match(missing.detail, /^typed=carol3 text=New message/);
+});
+
+test("inbox: falls back to the profile when New message does not open, and stops trying after two misses", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { requests, baseUrl } = await serve(t, "dead");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+  const send = (username) => session.sendDm({ username, message: MESSAGE });
+
+  const first = await send("alice");
+  assert.equal(first.status, "sent");
+  // The log says what the inbox showed.
+  assert.match(first.fallback, /^new_message=waiting presses=3 path=\/direct\/inbox\/ icons=1\/1 compose=0 dialogs=0$/);
+  const second = await send("bob");
+  assert.deepEqual([second.status, second.reason, Boolean(second.fallback)], ["skipped", "already_in_thread", true]);
+  // Two misses in a row: the profile route straight away.
+  assert.deepEqual(await send("twopanel"), { status: "sent" });
+  assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 2);
+  await session.idle();
+  assert.equal(session.alive(), true);
 });
