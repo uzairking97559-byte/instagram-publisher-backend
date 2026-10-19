@@ -1350,7 +1350,8 @@ function dmCard(campaign) {
   const head = element("div", undefined, "job-head");
   head.append(element("strong", campaign.name), element("span", DM_BADGES[campaign.status] || campaign.status, `badge ${campaign.status}`));
   const who = campaign.profile_name || `Profile ${campaign.profile_id.slice(0, 8)}`;
-  card.append(head, element("p", `${who} · ${campaign.daily_limit}/din · ${campaign.gap_minutes} min gap · ${hourLabel(campaign.start_hour)}–${hourLabel(campaign.end_hour)} · ${proxyLabel(campaign.proxy || "in")}`, "job-meta"));
+  const perDay = campaign.warmup && campaign.today_limit < campaign.daily_limit ? `${campaign.today_limit}/din (warm-up, max ${campaign.daily_limit})` : `${campaign.daily_limit}/din`;
+  card.append(head, element("p", `${who} · ${perDay} · ${campaign.gap_minutes} min gap · ${hourLabel(campaign.start_hour)}–${hourLabel(campaign.end_hour)} · ${proxyLabel(campaign.proxy || "in")}`, "job-meta"));
 
   const progress = element("section", undefined, "batch-progress");
   const heading = element("div", undefined, "batch-progress-heading");
@@ -1368,12 +1369,17 @@ function dmCard(campaign) {
   card.append(progress, stats);
 
   if (campaign.status === "running") {
-    const parts = [`Aaj ${counts.sent_today}/${campaign.daily_limit}`];
+    const parts = [`Aaj ${counts.sent_today}/${campaign.today_limit ?? campaign.daily_limit}`];
     if (campaign.next_send_at) parts.push(`Agla DM: ${formatWhen(campaign.next_send_at)}`);
     if (campaign.stop_after) parts.push(`Test: ${campaign.sent_since_start}/${campaign.stop_after}`);
     card.append(element("p", parts.join(" · "), "next-reel"));
   } else if (counts.sent_today) {
-    card.append(element("p", `Aaj ${counts.sent_today}/${campaign.daily_limit} DM gaye.`));
+    card.append(element("p", `Aaj ${counts.sent_today}/${campaign.today_limit ?? campaign.daily_limit} DM gaye.`));
+  }
+  // Warm-up: when the day's limit goes up next, or that it started again after a warning.
+  if (campaign.warmup && campaign.warmup_next) {
+    const when = new Date(campaign.warmup_next.at).toLocaleDateString([], { day: "numeric", month: "short" });
+    card.append(element("p", `${campaign.warmup_reset ? "Instagram warning ke baad warm-up dobara shuru hua. " : "Warm-up: "}${when} se roz ${campaign.warmup_next.limit} tak.`, "hint"));
   }
   const cost = campaign.cost;
   card.append(element("p", `Kharcha: ${rupees(cost.inr)}${cost.per_dm_inr !== null ? ` · ${rupees(cost.per_dm_inr)} har DM` : ""} · ${cost.proxy_mb} MB data${campaign.browser_active ? " · browser abhi khula hai" : ""}`, "dm-cost"));
@@ -1396,7 +1402,7 @@ function dmCard(campaign) {
     const start = element("button", "Start", "quiet strong"); start.type = "button"; start.disabled = !dmState.configured;
     start.addEventListener("click", () => {
       const stopAfter = amount.value ? Number(amount.value) : null;
-      if (!stopAfter && !confirm(`${counts.pending} creators ko DM jayenge: roz maximum ${campaign.daily_limit}, har ~${campaign.gap_minutes} minute mein ek. Start karein?`)) return;
+      if (!stopAfter && !confirm(`${counts.pending} creators ko DM jayenge: aaj maximum ${campaign.today_limit ?? campaign.daily_limit}, har ~${campaign.gap_minutes} minute mein ek. Start karein?`)) return;
       void dmAction(start, `/api/dm/campaigns/${campaign.id}/start`, { stop_after: stopAfter },
         () => notice(stopAfter ? `Start ho gaya: ${stopAfter} DM ke baad apne aap rukega. Pehla DM ek-do minute mein jayega.` : "Start ho gaya. Page band kar sakte ho, DM server se jaate rahenge."));
     });
@@ -1482,6 +1488,7 @@ function renderDmDetail(body, campaign, targets) {
   body.append(addLabel, add, addButtons);
   if (campaign.status !== "running") body.append(dmSettingsEditor(campaign));
 }
+const WARMUP_TEXT = "Apne aap warm-up: account ke pehle hafte roz 20 tak, phir har hafte +10 (upar wali limit tak). Instagram warning ke baad 10 se dobara.";
 function dmSettingsEditor(campaign) {
   const details = element("details", undefined, "frame-settings");
   details.append(element("summary", "Message ya speed badlo"));
@@ -1501,6 +1508,9 @@ function dmSettingsEditor(campaign) {
   }
   const proxyLabelNode = element("label", "Internet connection"); proxyLabelNode.append(proxy);
   const proxyNote = element("p", DM_PROXY_NOTES[proxy.value] || "", "hint");
+  const warmup = document.createElement("input"); warmup.type = "checkbox"; warmup.checked = campaign.warmup !== false;
+  const warmupLabel = element("label", undefined, "check");
+  warmupLabel.append(warmup, element("span", WARMUP_TEXT));
   proxy.addEventListener("change", () => { proxyNote.textContent = DM_PROXY_NOTES[proxy.value] || ""; });
   const save = element("button", "Save karo", "quiet strong"); save.type = "button";
   const buttons = element("div", undefined, "frame-buttons"); buttons.append(save);
@@ -1509,12 +1519,12 @@ function dmSettingsEditor(campaign) {
     try {
       await api(`/api/dm/campaigns/${campaign.id}`, { method: "PUT", body: JSON.stringify({
         message: message.value, daily_limit: Number(limit.value), gap_minutes: Number(gap.value),
-        start_hour: Number(start.value), end_hour: Number(end.value), proxy: proxy.value }) });
+        start_hour: Number(start.value), end_hour: Number(end.value), proxy: proxy.value, warmup: warmup.checked }) });
       notice(`“${campaign.name}” ki settings save ho gayi.`);
       await loadDm();
     } catch (error) { explain(error); save.disabled = false; }
   });
-  form.append(messageLabel, message, fields, proxyLabelNode, proxyNote, buttons);
+  form.append(messageLabel, message, fields, proxyLabelNode, proxyNote, warmupLabel, buttons);
   details.append(form);
   return details;
 }
@@ -1826,7 +1836,7 @@ $("dm-form").addEventListener("submit", async (event) => {
       name: $("dm-name").value.trim(), profile_id: profileId, profile_name: manual ? null : select.selectedOptions[0]?.dataset.name || null,
       message: $("dm-message").value, usernames: $("dm-usernames").value,
       daily_limit: Number($("dm-limit").value), gap_minutes: Number($("dm-gap").value),
-      start_hour: Number($("dm-start").value), end_hour: Number($("dm-end").value), proxy: $("dm-proxy").value,
+      start_hour: Number($("dm-start").value), end_hour: Number($("dm-end").value), proxy: $("dm-proxy").value, warmup: $("dm-warmup").checked,
       requested_contact: $("dm-consent").checked
     }) });
     const parts = [`${data.added} creators list mein`];

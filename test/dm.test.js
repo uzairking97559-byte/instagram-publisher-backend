@@ -470,3 +470,39 @@ test("a DM Instagram could not deliver is not counted as sent, and its notice is
   await tick();
   assert.equal(driver.checks[driver.checks.length - 1].found, 0);
 });
+
+test("warm-up: an account starts at 20 DMs a day, +10 a week, and 10 again after a warning", async (t) => {
+  const { h, driver, clock, cookie, advance, create, campaign, start, tick } = await setup(t, {
+    results: { user21: { status: "blocked", reason: "action_blocked", text: "Try Again Later", attempted: false } }
+  });
+  const id = (await create({ usernames: Array.from({ length: 30 }, (_, index) => `user${index}`).join("\n"), daily_limit: 100 })).data.campaign.id;
+  let detail = await campaign(id);
+  assert.deepEqual([detail.campaign.warmup, detail.campaign.today_limit], [true, 20], "on by default; a new account starts at 20");
+
+  // 20 already went out today: the next one waits for tomorrow 8:00 India time.
+  await h.db.query("UPDATE dm_targets SET status='sent',sent_at=$2 WHERE campaign_id=$1 AND position<=20", [id, clock.now]);
+  await start(id);
+  await tick();
+  assert.equal(driver.sent.length, 0);
+  detail = await campaign(id);
+  assert.equal(new Date(detail.campaign.next_send_at).toISOString(), "2026-10-19T02:30:00.000Z");
+  assert.deepEqual(detail.campaign.warmup_next, { at: new Date(clock.now.getTime() + 7 * 86400000).toISOString(), limit: 30 });
+
+  // A week after the account's first DM the limit is 30.
+  await h.db.query("UPDATE dm_targets SET sent_at=$2 WHERE campaign_id=$1 AND position=1", [id, new Date(clock.now.getTime() - 8 * 86400000)]);
+  await h.db.query("UPDATE dm_campaigns SET next_send_at=$2 WHERE id=$1", [id, clock.now]);
+  await tick();
+  assert.deepEqual(driver.sent.map((item) => item.username), ["user20"]);
+  assert.equal((await campaign(id)).campaign.today_limit, 30);
+
+  // An Instagram warning starts it again at 10.
+  advance(9 * 60000 + 1000);
+  await tick();
+  detail = await campaign(id);
+  assert.deepEqual([detail.campaign.pause_reason, detail.campaign.today_limit, detail.campaign.warmup_reset], ["action_blocked", 10, true]);
+
+  // Turned off, the campaign's own daily limit applies.
+  const updated = await h.request(`/api/dm/campaigns/${id}`, { method: "PUT", cookie, body: { warmup: false } });
+  assert.deepEqual([updated.data.campaign.warmup, updated.data.campaign.today_limit, updated.data.campaign.warmup_next], [false, 100, null]);
+  assert.equal((await h.request(`/api/dm/campaigns/${id}`, { method: "PUT", cookie, body: { warmup: "yes" } })).data.error, "invalid_campaign");
+});
