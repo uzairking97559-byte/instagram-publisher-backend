@@ -373,8 +373,9 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.equal((await answer("   ")).data.error, "invalid_answer");
   assert.equal((await answer("x".repeat(1001))).data.error, "invalid_answer");
   assert.equal((await answer("hi", "999999")).data.error, "reply_not_found");
-  assert.equal((await answer("Great, here are the details")).status, 200);
-  assert.equal((await account()).answering, 1);
+  // The request starts the worker at once; its answer shows the queue before that.
+  const queued = await answer("Great, here are the details");
+  assert.deepEqual([queued.status, queued.data.accounts[0].answering], [200, 1]);
   await tick();
   assert.deepEqual(driver.answers, [{ username: "one", thread: "/direct/t/111/", message: "Great, here are the details", repeat: true }]);
   data = await replies();
