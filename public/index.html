@@ -164,6 +164,17 @@
             <div><h2>Replies</h2><p class="muted">Jinhone DM ka jawab diya. Yahin se jawab likho, usi account se chala jayega.</p></div>
             <button id="replies-check" class="quiet strong small" type="button">Abhi check karo</button>
           </div>
+          <div id="telegram-card" class="tg-card" hidden>
+            <div>
+              <strong id="telegram-title">Replies Telegram par paao</strong>
+              <p id="telegram-text" class="hint">Naya reply aate hi bot message bhejega. Usi message par Reply karke jawab do, website usi Instagram account se bhej degi.</p>
+            </div>
+            <div class="tg-actions">
+              <button id="telegram-link" class="quiet strong small" type="button">Telegram jodo</button>
+              <a id="telegram-open" class="quiet strong small" href="#" target="_blank" rel="noopener noreferrer" hidden>Telegram mein kholo ↗</a>
+              <button id="telegram-unlink" class="quiet small" type="button" hidden>Hatao</button>
+            </div>
+          </div>
           <p id="replies-empty" class="empty" hidden>Pehle ek DM campaign chalao. Jinhe DM gaya, unke reply yahan dikhenge.</p>
           <div id="replies-body" hidden>
             <div id="replies-accounts" class="reply-tabs" role="tablist" aria-label="Instagram account"></div>
@@ -174,6 +185,20 @@
             </div>
             <div id="replies-list" class="jobs"></div>
           </div>
+          <details id="templates-panel" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Taiyaar jawab <span id="templates-count" class="count" hidden></span></summary>
+            <div class="dm-form">
+              <p class="hint">Jo jawab baar-baar dete ho, yahan save karo. Har reply ke neeche, aur Telegram mein button bankar, ek tap mein aa jayenge. <strong>{username}</strong> likho to wahan creator ka naam aayega.</p>
+              <div id="templates-list" class="template-list"></div>
+              <form id="template-form">
+                <label for="template-title">Button ka naam</label>
+                <input id="template-title" type="text" maxlength="24" required autocomplete="off" placeholder="Jaise: Details">
+                <label for="template-text">Jawab</label>
+                <textarea id="template-text" rows="4" maxlength="1000" required placeholder="Hi {username}! …"></textarea>
+                <button id="template-save" class="primary" type="submit">Jawab save karo</button>
+              </form>
+            </div>
+          </details>
         </section>
 
         <section id="campaigns" class="view" role="tabpanel" aria-labelledby="tab-campaigns" hidden>

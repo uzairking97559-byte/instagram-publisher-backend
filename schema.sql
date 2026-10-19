@@ -284,6 +284,30 @@ CREATE TABLE IF NOT EXISTS dm_outbox (
 );
 CREATE INDEX IF NOT EXISTS dm_outbox_queue_idx ON dm_outbox(profile_id, status, id);
 CREATE INDEX IF NOT EXISTS dm_outbox_reply_idx ON dm_outbox(reply_id);
+-- Telegram bot (lib/telegram.js): the one linked chat, which bot message is
+-- about which reply, and saved answers. announced_at: already sent to Telegram.
+CREATE TABLE IF NOT EXISTS telegram_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  chat_id BIGINT,
+  linked_at TIMESTAMPTZ,
+  link_code_hash TEXT,
+  link_expires_at TIMESTAMPTZ,
+  digest_sent_on DATE
+);
+CREATE TABLE IF NOT EXISTS telegram_messages (
+  message_id BIGINT PRIMARY KEY,
+  reply_id BIGINT NOT NULL REFERENCES dm_replies(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS dm_templates (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE dm_replies ADD COLUMN IF NOT EXISTS announced_at TIMESTAMPTZ;
+ALTER TABLE dm_outbox ADD COLUMN IF NOT EXISTS announced_at TIMESTAMPTZ;
 -- Only one running copy of the service sends DMs (a deploy briefly runs two).
 CREATE TABLE IF NOT EXISTS dm_worker_lease (
   id INTEGER PRIMARY KEY CHECK (id = 1),

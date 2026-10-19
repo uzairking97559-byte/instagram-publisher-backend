@@ -1230,6 +1230,11 @@ const DM_REASONS = {
   page_error: "Page mein error aaya"
 };
 Object.assign(messages, {
+  invalid_template: "Button ka naam 24 akshar tak aur jawab 1–1000 akshar ka rakho.",
+  too_many_templates: "8 se zyada taiyaar jawab nahi rakh sakte. Koi purana hatao.",
+  template_not_found: "Ye jawab nahi mila. Refresh karo.",
+  telegram_not_configured: "Telegram bot ka token Render mein nahi hai. Render → Environment mein TELEGRAM_BOT_TOKEN daalo.",
+  telegram_failed: "Telegram se jawab nahi mila. Thodi der baad dobara try karo.",
   dm_not_configured: "DM Sender ke liye Browser Use key set nahi hai. Render → Environment mein BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
   invalid_campaign: "Naam (60 akshar tak), profile, message (har version 1000 akshar tak, 10 versions tak), roz ki limit 1–200, gap 2–60 minute aur shuru/band ka alag time check karo.",
   contact_not_confirmed: "Neeche wala box tick karo: message sirf unhe jayega jinhone khud promotion ke liye comment/request kiya.",
@@ -1531,11 +1536,91 @@ function readStoredAccount() { try { return localStorage.getItem("dm-replies-acc
 function storeAccount(id) { try { localStorage.setItem("dm-replies-account", id); } catch { /* private window */ } }
 function accountLabel(item) { return item.account ? `@${item.account}` : item.name || `Profile ${item.profile_id.slice(0, 8)}`; }
 
+let telegramState = null;
+let templates = [];
 async function loadReplies() {
-  replyState = await api("/api/dm/replies");
+  const [data, bot, saved] = await Promise.all([api("/api/dm/replies"), api("/api/telegram").catch(() => null), api("/api/dm/templates").catch(() => null)]);
+  replyState = data;
+  if (bot) telegramState = bot;
+  if (saved) templates = saved.templates;
   renderReplies();
+  renderTelegram();
+  renderTemplates();
   updateDmPolling();
 }
+// ---- Telegram bot link ----
+function renderTelegram() {
+  const card = $("telegram-card");
+  card.hidden = !telegramState;
+  if (!telegramState) return;
+  const linked = telegramState.linked;
+  card.classList.toggle("linked", linked);
+  $("telegram-title").textContent = linked ? `Telegram juda hai ✓${telegramState.bot ? ` (@${telegramState.bot})` : ""}` : "Replies Telegram par paao";
+  $("telegram-text").textContent = !telegramState.configured
+    ? "Iske liye Render → Environment mein TELEGRAM_BOT_TOKEN daalo (token kisi chat mein mat bhejna)."
+    : linked ? "Naye reply wahin aate hain. Bot ke message par Reply karke jawab do; /check se inbox check, /aaj se aaj ka hisaab."
+    : "Naya reply aate hi bot message bhejega. Usi message par Reply karke jawab do, website usi Instagram account se bhej degi.";
+  $("telegram-link").hidden = linked || !telegramState.configured || !$("telegram-open").hidden;
+  $("telegram-unlink").hidden = !linked;
+  if (linked) $("telegram-open").hidden = true;
+}
+$("telegram-link").addEventListener("click", async () => {
+  const button = $("telegram-link");
+  button.disabled = true;
+  try {
+    const { url } = await api("/api/telegram/link", { method: "POST", body: "{}" });
+    $("telegram-open").href = url;
+    $("telegram-open").hidden = false;
+    button.hidden = true;
+    notice("“Telegram mein kholo” dabao, phir bot mein Start. Link 15 minute tak chalega.");
+    // Watch for the link to be used.
+    let tries = 0;
+    const watch = setInterval(async () => {
+      tries++;
+      const bot = await api("/api/telegram").catch(() => null);
+      if (bot) telegramState = bot;
+      if (telegramState?.linked || tries > 60) { clearInterval(watch); $("telegram-open").hidden = true; renderTelegram(); if (telegramState?.linked) notice("Telegram jud gaya. Naye reply ab wahan bhi aayenge."); }
+    }, 5000);
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+$("telegram-unlink").addEventListener("click", async () => {
+  if (!confirm("Telegram bot se replies aana band karna hai?")) return;
+  try { telegramState = await api("/api/telegram", { method: "DELETE" }); renderTelegram(); }
+  catch (error) { explain(error); }
+});
+// ---- Saved answers ----
+function renderTemplates() {
+  const list = $("templates-list");
+  list.replaceChildren();
+  $("templates-count").hidden = !templates.length;
+  $("templates-count").textContent = String(templates.length);
+  if (!templates.length) list.append(element("p", "Abhi koi taiyaar jawab nahi hai.", "hint"));
+  for (const item of templates) {
+    const row = element("div", undefined, "template-row");
+    const text = element("div");
+    text.append(element("strong", item.title), element("p", item.text));
+    const remove = element("button", "Hatao", "quiet small danger"); remove.type = "button";
+    remove.addEventListener("click", async () => {
+      if (!confirm(`“${item.title}” wala jawab hatana hai?`)) return;
+      try { templates = (await api(`/api/dm/templates/${encodeURIComponent(item.id)}`, { method: "DELETE" })).templates; renderTemplates(); renderReplies(); }
+      catch (error) { explain(error); }
+    });
+    row.append(text, remove);
+    list.append(row);
+  }
+}
+$("template-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("template-save"); button.disabled = true;
+  try {
+    templates = (await api("/api/dm/templates", { method: "POST", body: JSON.stringify({ title: $("template-title").value.trim(), text: $("template-text").value }) })).templates;
+    $("template-title").value = ""; $("template-text").value = "";
+    renderTemplates(); renderReplies();
+    notice("Jawab save ho gaya. Ab har reply ke neeche aur Telegram mein button dikhega.");
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
 function renderReplies() {
   renderToday();
   const ready = Boolean(replyState && replyState.accounts.length);
@@ -1645,7 +1730,18 @@ function replyCard(reply) {
     });
     actions.append(done);
   }
-  form.append(box, actions);
+  // Saved answers: a tap fills the box (the creator's name filled in); edit, then Bhejo.
+  const quick = element("div", undefined, "reply-quick");
+  for (const item of templates) {
+    const chip = element("button", item.title, "reply-chip"); chip.type = "button";
+    chip.addEventListener("click", () => {
+      box.value = item.text.replace(/\{\s*(?:username|name)\s*\}/gi, reply.username || reply.name || "");
+      replyDrafts.set(reply.id, box.value);
+      box.focus();
+    });
+    quick.append(chip);
+  }
+  form.append(box, ...(templates.length ? [quick] : []), actions);
   card.append(form);
   return card;
 }
