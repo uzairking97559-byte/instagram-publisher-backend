@@ -190,6 +190,8 @@ function renderToday() {
   $("messages-badge").textContent = fresh ? String(fresh) : "";
   $("replies-tab-count").hidden = !fresh;
   $("replies-tab-count").textContent = fresh ? String(fresh) : "";
+  // New replies also show in the browser tab's title.
+  document.title = fresh ? `(${fresh}) Creator Publishing Tool` : "Creator Publishing Tool";
 }
 function selectAccount(id) {
   const next = accounts.some((account) => account.connection_id === id) ? id : ALL_ACCOUNTS;
