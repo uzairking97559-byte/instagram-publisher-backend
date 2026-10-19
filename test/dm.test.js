@@ -434,3 +434,39 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.equal((await account()).check_status, "logged_out");
   assert.equal([...fake.browsers.values()].every((item) => item.status === "stopped"), true);
 });
+
+test("a DM Instagram could not deliver is not counted as sent, and its notice is not a reply", async (t) => {
+  const { h, driver, cookie, advance, create, campaign, start, tick } = await setup(t, {
+    results: { two: { status: "skipped", reason: "not_delivered" } }
+  });
+  const NOTICE = "इस अकाउंट पर आपका मैसेज नहीं भेजा जा सकता, क्योंकि उन्होंने सभी लोगों से नए मैसेज पाने की परमिशन नहीं दी है.";
+  const id = (await create({ usernames: "one\ntwo\nthree", daily_limit: 2 })).data.campaign.id;
+  // A notice saved as a reply by the earlier version is hidden at start.
+  await h.db.query("INSERT INTO dm_replies(profile_id,thread,username,name,row_key,text) VALUES($1,'/direct/t/9/','zed','Zed','Zed|x',$2)", [PROFILE, NOTICE]);
+  await start(id);
+  await tick();
+  advance(9 * 60000 + 1000);
+  await tick();
+  let detail = await campaign(id);
+  assert.deepEqual(detail.targets.map((row) => [row.username, row.status, row.reason]),
+    [["one", "sent", null], ["two", "skipped", "not_delivered"], ["three", "pending", null]]);
+  // It took a turn like a DM: the normal gap, and it counts toward the day's 2.
+  advance(9 * 60000 + 1000);
+  await tick();
+  assert.deepEqual(driver.sent.map((item) => item.username), ["one", "two"]);
+  assert.equal(new Date((await campaign(id)).campaign.next_send_at).toISOString(), "2026-10-19T02:30:00.000Z", "next day at 8:00 in India");
+
+  // The inbox shows Instagram's notice in One's chat: One never got the DM either.
+  driver.inbox.replies = [{ key: "One|notice", name: "One", username: "one", thread: "/direct/t/1/", text: NOTICE, matched: true, kind: "undelivered" }];
+  await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } });
+  await tick();
+  detail = await campaign(id);
+  assert.deepEqual([detail.campaign.counts.sent, detail.campaign.counts.skipped], [0, 2]);
+  assert.equal(detail.targets[0].reason, "not_delivered");
+  const replies = (await h.request("/api/dm/replies", { cookie })).data;
+  assert.deepEqual([replies.replies.length, replies.accounts[0].new], [0, 0], "notices are not replies");
+  // Not opened again at the next check.
+  await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } });
+  await tick();
+  assert.equal(driver.checks[driver.checks.length - 1].found, 0);
+});
