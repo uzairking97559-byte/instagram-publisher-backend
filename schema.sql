@@ -308,6 +308,10 @@ CREATE TABLE IF NOT EXISTS dm_templates (
 );
 ALTER TABLE dm_replies ADD COLUMN IF NOT EXISTS announced_at TIMESTAMPTZ;
 ALTER TABLE dm_outbox ADD COLUMN IF NOT EXISTS announced_at TIMESTAMPTZ;
+-- Warm-up (lib/dm.js): an account's daily DMs start at 20 and grow by 10 each
+-- week; an Instagram warning or security check starts it again at 10.
+ALTER TABLE dm_campaigns ADD COLUMN IF NOT EXISTS warmup BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE dm_inboxes ADD COLUMN IF NOT EXISTS last_warning_at TIMESTAMPTZ;
 -- Only one running copy of the service sends DMs (a deploy briefly runs two).
 CREATE TABLE IF NOT EXISTS dm_worker_lease (
   id INTEGER PRIMARY KEY CHECK (id = 1),
