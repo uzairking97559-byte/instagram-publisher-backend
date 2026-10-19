@@ -88,6 +88,7 @@ if (window.INBOX) {
     go.addEventListener('click', () => {
       if (go.getAttribute('aria-disabled') === 'true') return;
       dialog.remove();
+      if (window.THREADS) { const thread = window.THREADS.find((item) => item.user === chosen); setTimeout(() => openThread(thread.id), 150); return; }
       for (const old of document.querySelectorAll('section')) old.remove();
       history.pushState(null, '', '/direct/t/' + chosen + '/');
       setTimeout(() => openChat(users[chosen].name, users[chosen].old), 150);
@@ -96,12 +97,81 @@ if (window.INBOX) {
     document.body.append(dialog);
   };
 }
+// THREADS: Instagram's desktop inbox: a side menu, the chat list (rows of name
+// and last-message preview) and the open chat's column, whose header links to
+// the person's profile; their messages on the left, ours on the right.
+function rowPreview(thread) {
+  const last = thread.msgs[thread.msgs.length - 1];
+  return (thread.seen ? 'Seen' : last.me ? 'You: ' + last.text : last.text) + ' · 5m';
+}
+function renderList() {
+  const list = document.querySelector('.list');
+  list.querySelectorAll('.row').forEach((row) => row.remove());
+  for (const thread of window.THREADS) {
+    const row = document.createElement('div'); row.className = 'row'; row.setAttribute('role', 'button'); row.tabIndex = 0;
+    row.innerHTML = '<div class="avatar"></div><div><div class="n"></div><div class="pv"></div></div>';
+    row.querySelector('.n').textContent = thread.name; row.querySelector('.pv').textContent = rowPreview(thread);
+    row.addEventListener('click', () => setTimeout(() => openThread(thread.id), 120));
+    list.append(row);
+  }
+}
+function openThread(id) {
+  const thread = window.THREADS.find((item) => item.id === id);
+  if (location.pathname !== '/direct/t/' + id + '/') history.pushState(null, '', '/direct/t/' + id + '/');
+  const pane = document.querySelector('.pane');
+  pane.innerHTML = '<div class="head"></div><div class="msgs"></div><div class="composer"><div role="textbox" contenteditable="true" aria-label="Message"></div><div class="ph">Message...</div></div>';
+  if (thread.link !== false) pane.querySelector('.head').innerHTML = '<a role="link" href="/' + thread.user + '/"><div>' + thread.name + '</div><div>Active 5m ago</div></a>';
+  else pane.querySelector('.head').textContent = thread.name;
+  const msgs = pane.querySelector('.msgs');
+  const add = (text, me, extra) => { const b = document.createElement('div'); b.className = 'b ' + (me ? 'me' : 'them') + (extra || ''); const t = document.createElement('div'); t.setAttribute('dir', 'auto'); t.textContent = text; b.append(t); msgs.append(b); };
+  if (thread.link === false) msgs.innerHTML = '<div class="card"><div>' + thread.name + '</div><a href="/' + thread.user + '/" role="link">View profile</a></div>';
+  thread.msgs.forEach((m, i) => {
+    if (i === 1) { const d = document.createElement('div'); d.className = 'date'; d.textContent = 'Today 10:45 PM'; msgs.append(d); }
+    add(m.text, m.me);
+    if (m.me && i === thread.msgs.length - 1) { const s = document.createElement('div'); s.className = 'seen'; s.textContent = 'Seen'; msgs.append(s); }
+  });
+  const box = pane.querySelector('[role=textbox]');
+  box.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    const text = box.innerText.trim();
+    setTimeout(() => { thread.msgs.push({ me: true, text }); thread.seen = false; add(text, true); box.textContent = ''; renderList(); }, 150);
+  });
+}
+if (window.THREADS) {
+  renderList();
+  const parts = location.pathname.split('/');
+  if (parts[1] === 'direct' && parts[2] === 't') setTimeout(() => openThread(parts[3]), 200);
+}
 `;
 function profile(user, { button = true, extra = "", setup = "" } = {}) {
   return page(`<script>${setup}</script><header><h2>${user}</h2><span>1,234 followers</span></header>
     ${button ? `<div role="button" tabindex="0" data-open="${user}">मैसेज भेजें</div>` : '<div role="button">Follow</div>'}
     <img src="/picture.png" alt="">${extra}`);
 }
+
+// The threads inbox (see THREADS above): who wrote last decides the preview.
+const OURS = (user) => `Hi ${user} 👋 You commented on our reel. Want the details?`;
+const THREADS = [
+  { id: "1", user: "carol", name: "Carol C", msgs: [{ me: true, text: OURS("carol") }, { text: "Yes interested" }, { text: "How to join?" }] },
+  { id: "2", user: "dave", name: "Dave D", msgs: [{ me: true, text: OURS("dave") }] },
+  { id: "3", user: "erin", name: "Erin E", link: false, msgs: [{ text: "Hello? Anyone there" }] },
+  { id: "4", user: "frank", name: "Frank F", msgs: [{ me: true, text: OURS("frank") }, { text: "ok" }] },
+  { id: "5", user: "gina", name: "Gina G", seen: true, msgs: [{ me: true, text: OURS("gina") }] }
+];
+const THREADS_PAGE = page(`<style>
+  body { margin: 0; display: flex; height: 100vh; font: 14px sans-serif; }
+  .nav { width: 72px; } .nav a { display: block; width: 40px; height: 40px; margin: 12px; }
+  .list { width: 380px; } .list .top { height: 60px; } .row { display: flex; height: 64px; align-items: center; } .avatar { width: 44px; height: 44px; margin: 0 12px; }
+  .pane { flex: 1; display: flex; flex-direction: column; } .head { height: 60px; } .head a { display: block; width: 300px; }
+  .msgs { flex: 1; display: flex; flex-direction: column; padding: 12px; } .b { max-width: 60%; padding: 8px; margin: 4px 0; }
+  .me, .seen { align-self: flex-end; } .them { align-self: flex-start; } .date { align-self: center; } .card { align-self: center; }
+  .composer { position: relative; margin: 12px; } .composer [role=textbox] { min-height: 20px; } .ph { position: absolute; left: 4px; top: 0; pointer-events: none; }
+</style><script>window.INBOX = ${JSON.stringify(Object.fromEntries(THREADS.map((thread) => [thread.user, { name: thread.name, old: [] }])))};` +
+  `window.INBOX_MODE = "ok"; window.THREADS = ${JSON.stringify(THREADS)};</script>` +
+  '<div class="nav"><a href="/aiglow.test/" role="link"><span>P</span></a></div>' +
+  '<div class="list"><div class="top"><div>aiglow.test</div><div role="button" tabindex="0" data-compose><svg aria-label="New message" role="img" width="24" height="24"></svg></div></div></div>' +
+  '<div class="pane"></div>');
 
 function site(requests, inbox = "ok") {
   const pages = {
@@ -127,7 +197,7 @@ function site(requests, inbox = "ok") {
     requests.push(req.url);
     if (req.url === "/login/") { res.writeHead(302, { location: "/accounts/login/" }); return res.end(); }
     if (req.url === "/picture.png") { res.writeHead(200, { "content-type": "image/png" }); return res.end(Buffer.alloc(64)); }
-    const html = pages[req.url];
+    const html = inbox === "threads" && req.url.startsWith("/direct/") ? THREADS_PAGE : pages[req.url];
     res.writeHead(html ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
     res.end(html || "not found");
   });
@@ -258,4 +328,39 @@ test("inbox: falls back to the profile when New message does not open, and stops
   assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 2);
   await session.idle();
   assert.equal(session.alive(), true);
+});
+
+test("replies: reads who wrote back and what, and sends the owner's answers", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { requests, baseUrl } = await serve(t, "threads");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+  const sentTo = { carol: [OURS("carol")], frank: [OURS("frank")] };
+
+  const check = await session.readReplies({
+    outgoing: async (username) => sentTo[username] || [],
+    known: async (key) => key.startsWith("Frank F|")
+  });
+  assert.equal(check.status, "ok");
+  assert.equal(check.account, "aiglow.test");
+  // Carol, Erin and Frank wrote last; Dave's preview is ours, Gina's says Seen.
+  assert.deepEqual([check.rows, check.waiting, check.skipped], [5, 3, 1]);
+  assert.match(check.detail, /^O:You: Hi dave \| T:Yes interes|T:How to join/);
+  assert.deepEqual(check.replies.map(({ key, ...reply }) => reply), [
+    // Only what came after our message: not the date, our "Seen" or the box's placeholder.
+    { name: "Carol C", username: "carol", thread: "/direct/t/1/", text: "Yes interested\nHow to join?", matched: true },
+    // No message of ours to start from: the list's preview. Username from "View profile".
+    { name: "Erin E", username: "erin", thread: "/direct/t/3/", text: "Hello? Anyone there", matched: false }
+  ]);
+  assert.equal(check.replies[0].key, "Carol C|How to join?");
+
+  // An answer goes by the chat's address when the username is not known, and
+  // is sent even if the same words are already there ("ok")…
+  assert.deepEqual(await session.sendReply({ thread: "/direct/t/4/", message: "ok" }), { status: "sent" });
+  // …and through the inbox search when it is (no page load).
+  assert.deepEqual(await session.sendReply({ username: "carol", message: "Great! Here are the details" }), { status: "sent" });
+  assert.equal(requests.filter((url) => url.startsWith("/direct/")).length, 2, "the inbox once, then the chat address");
+
+  // After our answer Carol's chat shows our message last and is not listed again.
+  const again = await session.readReplies({ outgoing: async (username) => sentTo[username] || [], known: async () => false });
+  assert.deepEqual(again.replies.map((reply) => reply.username), ["erin"]);
 });
