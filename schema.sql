@@ -239,6 +239,48 @@ CREATE TABLE IF NOT EXISTS dm_browsers (
   stopped_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS dm_browsers_campaign_idx ON dm_browsers(campaign_id);
+-- Replies (lib/dm.js), per Instagram account (Browser Use profile): chats
+-- where the other person wrote last, and the answers the owner types on the
+-- website. dm_inboxes keeps each account's last check and a pending request.
+CREATE TABLE IF NOT EXISTS dm_inboxes (
+  profile_id UUID PRIMARY KEY,
+  account TEXT,
+  check_requested_at TIMESTAMPTZ,
+  checked_at TIMESTAMPTZ,
+  check_status TEXT,
+  check_detail TEXT,
+  retry_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS dm_replies (
+  id BIGSERIAL PRIMARY KEY,
+  profile_id UUID NOT NULL,
+  thread TEXT NOT NULL,
+  username TEXT CHECK (username IS NULL OR username ~ '^[a-z0-9._]{1,30}$'),
+  name TEXT,
+  row_key TEXT NOT NULL,
+  text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'answered', 'done')),
+  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (profile_id, thread)
+);
+CREATE INDEX IF NOT EXISTS dm_replies_key_idx ON dm_replies(profile_id, row_key);
+CREATE TABLE IF NOT EXISTS dm_outbox (
+  id BIGSERIAL PRIMARY KEY,
+  reply_id BIGINT NOT NULL REFERENCES dm_replies(id) ON DELETE CASCADE,
+  profile_id UUID NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+  reason TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  -- Set when a send was cut off by a restart: retried only if not already in the chat.
+  resume BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dm_outbox_queue_idx ON dm_outbox(profile_id, status, id);
+CREATE INDEX IF NOT EXISTS dm_outbox_reply_idx ON dm_outbox(reply_id);
 -- Only one running copy of the service sends DMs (a deploy briefly runs two).
 CREATE TABLE IF NOT EXISTS dm_worker_lease (
   id INTEGER PRIMARY KEY CHECK (id = 1),

@@ -45,11 +45,16 @@ function browserUseFake() {
 }
 
 // Stands in for lib/instagram-dm.js: answers per username, "sent" by default.
+// inbox: what a reply check finds (replies, the account's username, or a
+// "blocked" result) and how typed answers go (by message text).
 function fakeDriver(results = {}) {
   const sent = [];
   const opened = [];
+  const checks = [];
+  const answers = [];
+  const inbox = { account: "aiglow.artlab", replies: [], blocked: null, answerResults: {} };
   return {
-    sent, opened, results,
+    sent, opened, results, checks, answers, inbox,
     async open(cdpUrl) {
       opened.push(cdpUrl);
       let alive = true;
@@ -58,6 +63,23 @@ function fakeDriver(results = {}) {
         sendDm: async ({ username, message, previous }) => {
           sent.push({ username, message, previous });
           return results[username] || { status: "sent" };
+        },
+        readReplies: async ({ outgoing, known }) => {
+          if (inbox.blocked) { checks.push({ blocked: true }); return inbox.blocked; }
+          const found = [];
+          const ours = {};
+          let skipped = 0;
+          for (const reply of inbox.replies) {
+            if (await known(reply.key)) { skipped++; continue; }
+            ours[reply.username] = await outgoing(reply.username);
+            found.push(reply);
+          }
+          checks.push({ ours, found: found.length });
+          return { status: "ok", account: inbox.account, rows: inbox.replies.length + 2, waiting: inbox.replies.length, skipped, replies: found, detail: "T:x" };
+        },
+        sendReply: async (item) => {
+          answers.push(item);
+          return inbox.answerResults[item.message] || { status: "sent" };
         },
         idle: async () => {},
         close: () => { alive = false; }
@@ -322,4 +344,90 @@ test("after a restart, leftover browsers are stopped and only one copy of the se
   const row = (await h.db.query("SELECT status,proxy_mb::float8 AS mb FROM dm_browsers WHERE id=$1", [leftover])).rows[0];
   assert.deepEqual(row, { status: "stopped", mb: 2 });
   assert.deepEqual(driver.sent.map((item) => item.username), ["one"], "the half-done message is tried again");
+});
+
+test("replies: read per account between DMs, answered from the website, checked on request", async (t) => {
+  const { h, fake, driver, cookie, advance, create, start, tick } = await setup(t);
+  const id = (await create({ usernames: "one\ntwo\nthree", message: "Hi {username}, want details?" })).data.campaign.id;
+  const replies = async () => (await h.request("/api/dm/replies", { cookie })).data;
+  const account = async () => (await replies()).accounts[0];
+  driver.inbox.replies = [{ key: "One|Yes please", name: "One", username: "one", thread: "/direct/t/111/", text: "Yes please", matched: true }];
+
+  // The first DM, then a look at the inbox in the same open browser.
+  await start(id);
+  await tick();
+  assert.deepEqual(driver.sent.map((item) => item.username), ["one"]);
+  assert.equal(driver.checks.length, 1);
+  assert.deepEqual(driver.checks[0].ours, { one: ["Hi one, want details?"] }, "our DM marks where their reply starts");
+  let data = await replies();
+  assert.equal(data.accounts.length, 1);
+  const { profile_id, name, account: handle, new: fresh, answering, check_status, checking } = data.accounts[0];
+  assert.deepEqual({ profile_id, name, handle, fresh, answering, check_status, checking },
+    { profile_id: PROFILE, name: "Personal Profile", handle: "aiglow.artlab", fresh: 1, answering: 0, check_status: "ok", checking: false });
+  assert.deepEqual(data.replies.map(({ username, text, status, answers }) => ({ username, text, status, answers })),
+    [{ username: "one", text: "Yes please", status: "new", answers: [] }]);
+  const replyId = data.replies[0].id;
+
+  // The owner answers; the worker sends it from the same account.
+  const answer = (message, reply = replyId) => h.request(`/api/dm/replies/${reply}/answer`, { method: "POST", cookie, body: { message } });
+  assert.equal((await answer("   ")).data.error, "invalid_answer");
+  assert.equal((await answer("x".repeat(1001))).data.error, "invalid_answer");
+  assert.equal((await answer("hi", "999999")).data.error, "reply_not_found");
+  assert.equal((await answer("Great, here are the details")).status, 200);
+  assert.equal((await account()).answering, 1);
+  await tick();
+  assert.deepEqual(driver.answers, [{ username: "one", thread: "/direct/t/111/", message: "Great, here are the details", repeat: true }]);
+  data = await replies();
+  assert.equal(data.replies[0].status, "answered");
+  assert.deepEqual(data.replies[0].answers.map((item) => [item.message, item.status]), [["Great, here are the details", "sent"]]);
+  assert.equal(driver.checks.length, 2, "read again after sending");
+  assert.equal(driver.checks[1].found, 0, "a chat that looks the same is not opened again");
+
+  // They write again; the owner asks for a check.
+  driver.inbox.replies = [{ key: "One|How much?", name: "One", username: "one", thread: "/direct/t/111/", text: "How much?", matched: true }];
+  assert.equal((await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: "nope" } })).data.error, "invalid_profile");
+  assert.equal((await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: crypto.randomUUID() } })).data.error, "profile_not_found");
+  const asked = await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } });
+  assert.equal(asked.data.accounts[0].checking, true);
+  await tick();
+  assert.deepEqual(driver.checks[2].ours, { one: ["Hi one, want details?", "Great, here are the details"] });
+  data = await replies();
+  assert.deepEqual([data.replies.length, data.replies[0].text, data.replies[0].status, data.accounts[0].checking], [1, "How much?", "new", false]);
+
+  // An answer that cannot be delivered says why.
+  driver.inbox.answerResults["Not found answer"] = { status: "skipped", reason: "not_found" };
+  await answer("Not found answer");
+  await tick();
+  assert.deepEqual((await replies()).replies[0].answers.map((item) => [item.status, item.reason]), [["sent", null], ["failed", "not_found"]]);
+
+  // "Ho gaya" hides it from the new ones.
+  const done = await h.request(`/api/dm/replies/${replyId}/done`, { method: "POST", cookie, body: {} });
+  assert.deepEqual([done.data.replies[0].status, done.data.accounts[0].new], ["done", 0]);
+
+  // With the campaign paused its browser closes; a check opens one just for
+  // replies (same India connection), which closes 3 minutes after.
+  await h.request(`/api/dm/campaigns/${id}/pause`, { method: "POST", cookie, body: {} });
+  await tick();
+  assert.equal([...fake.browsers.values()][0].status, "stopped");
+  await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } });
+  await tick();
+  assert.equal(driver.opened.length, 2);
+  const second = [...fake.browsers.values()][1];
+  assert.deepEqual([second.body.proxyCountryCode, second.body.metadata.purpose, second.status], ["in", "replies", "active"]);
+  advance(3 * 60000 + 1000);
+  await tick();
+  assert.equal(second.status, "stopped");
+  assert.ok((await account()).cost_inr > 0, "reply checks show their own cost");
+
+  // A logout seen while reading the inbox stops the account's campaign too.
+  await start(id);
+  await tick();
+  assert.deepEqual(driver.sent.map((item) => item.username), ["one", "two"]);
+  driver.inbox.blocked = { status: "blocked", reason: "logged_out", text: null, attempted: false };
+  await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } });
+  await tick();
+  const detail = (await h.request(`/api/dm/campaigns/${id}`, { cookie })).data;
+  assert.deepEqual([detail.campaign.status, detail.campaign.pause_reason], ["paused", "logged_out"]);
+  assert.equal((await account()).check_status, "logged_out");
+  assert.equal([...fake.browsers.values()].every((item) => item.status === "stopped"), true);
 });
