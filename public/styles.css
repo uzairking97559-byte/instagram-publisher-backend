@@ -586,3 +586,26 @@ footer a { color: var(--accent); }
 .badge.running, .badge.sending { background: var(--info-soft); color: var(--info); }
 .badge.completed, .badge.sent { background: var(--accent-soft); color: var(--accent); }
 @media (max-width: 420px) { .dm-fields { grid-template-columns: 1fr; } }
+
+/* Replies: per Instagram account, who wrote back and the owner's answers */
+.replies { margin: 0 0 18px; padding: 14px 16px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.replies-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.replies-head h3 { margin: 0; font-size: 16px; }
+.reply-tabs { display: flex; gap: 8px; margin-top: 12px; overflow-x: auto; padding-bottom: 2px; }
+.reply-tab, .reply-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.reply-tab[aria-selected="true"], .reply-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.reply-count { min-width: 20px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; text-align: center; }
+.reply-filter { display: flex; gap: 6px; margin: 10px 0 12px; }
+.reply-chip { min-height: 32px; padding: 4px 12px; }
+.replies .hint.bad { color: var(--danger); }
+.reply-card.fresh { border-color: rgba(212, 237, 138, .45); }
+.reply-card .job-head a { color: var(--text); font-weight: 700; text-decoration: none; }
+.job-card p.reply-text { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--sunken); color: var(--text); font-size: 14px; white-space: pre-wrap; }
+.job-card p.reply-answer { margin: 6px 0 0 28px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text); white-space: pre-wrap; }
+.reply-answer small { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); white-space: normal; }
+.reply-answer.failed small { color: var(--danger); }
+.reply-form textarea { margin-top: 10px; min-height: 64px; font-size: 14px; }
+.badge.new { background: var(--accent-soft); color: var(--accent); }
+.badge.answered { background: var(--info-soft); color: var(--info); }
+.badge.done { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--faint); }

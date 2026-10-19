@@ -1015,7 +1015,8 @@ $("logout").addEventListener("click", async () => {
     if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
-    dmState = null; checkState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); renderDm(); renderChecks();
+    dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
+    renderDm(); renderChecks(); renderReplies();
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1185,7 +1186,12 @@ Object.assign(messages, {
   browser_use_not_found: "Browser Use mein ye profile nahi mila. Campaign ka profile check karo.",
   browser_use_busy: "Browser Use abhi busy hai. Thodi der baad try karo.",
   browser_use_failed: "Browser Use se sahi jawab nahi mila. Thodi der baad try karo.",
-  browser_use_unreachable: "Browser Use tak connection nahi hua. Thodi der baad try karo."
+  browser_use_unreachable: "Browser Use tak connection nahi hua. Thodi der baad try karo.",
+  invalid_answer: "Jawab 1 se 1000 akshar ka likho.",
+  answers_waiting: "Is creator ke 3 jawab pehle se line mein hain. Unke jaane ka wait karo.",
+  reply_not_found: "Ye reply ab nahi mila. Refresh karo.",
+  invalid_profile: "Ye account nahi mila. Refresh karo.",
+  profile_not_found: "Ye account nahi mila. Refresh karo."
 });
 let dmState = null;
 let dmLoading = null;
@@ -1236,6 +1242,7 @@ async function loadDm() {
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && $("dm-new").open) void loadDmProfiles();
   void loadChecks().catch(() => {});
+  void loadReplies().catch(() => {});
 }
 function renderDm() {
   const list = $("dm-campaigns");
@@ -1250,13 +1257,14 @@ function renderDm() {
 // While a campaign runs, its card refreshes every 20 seconds (only on this tab).
 function updateDmPolling() {
   const active = !$("dms").hidden && !$("workspace").hidden && (Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running")) ||
-    Boolean(checkState?.checks.some((check) => check.status === "running")));
+    Boolean(checkState?.checks.some((check) => check.status === "running")) ||
+    Boolean(replyState?.accounts.some((account) => account.checking || account.answering)));
   if (active && !dmPollTimer) {
     dmPollTimer = setInterval(() => {
       if ($("workspace").hidden || $("dms").hidden) { updateDmPolling(); return; }
       // Don't redraw the cards while the owner is typing in one of them.
       const focused = document.activeElement;
-      if (focused && $("dm-campaigns").contains(focused) && focused.matches("input, textarea, select")) return;
+      if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused)) && focused.matches("input, textarea, select")) return;
       void loadDm().catch(explain);
     }, 20000);
   }
@@ -1443,6 +1451,152 @@ function dmSettingsEditor(campaign) {
   form.append(messageLabel, message, fields, proxyLabelNode, proxyNote, buttons);
   details.append(form);
   return details;
+}
+
+// ---- Replies: per Instagram account, who wrote back, and answers to send ----
+let replyState = null;
+let replyAccount = null;
+let replyFilter = "new";
+const replyDrafts = new Map();
+const REPLY_BADGES = { new: "NAYA", answered: "JAWAB GAYA", done: "HO GAYA" };
+const REPLY_CHECK_PROBLEMS = {
+  check_failed: "Pichhla check poora nahi hua. Dobara “Abhi check karo” dabao.",
+  browser_connect_failed: "Browser se connection nahi bana. Thodi der baad “Abhi check karo” dabao.",
+  browser_failed: "Browser nahi khula. Thodi der baad “Abhi check karo” dabao."
+};
+const ANSWER_REASONS = { not_found: "Account nahi mila", no_chat: "Chat nahi mili", inbox_unavailable: "Inbox nahi khula" };
+
+function readStoredAccount() { try { return localStorage.getItem("dm-replies-account"); } catch { return null; } }
+function storeAccount(id) { try { localStorage.setItem("dm-replies-account", id); } catch { /* private window */ } }
+function accountLabel(item) { return item.account ? `@${item.account}` : item.name || `Profile ${item.profile_id.slice(0, 8)}`; }
+
+async function loadReplies() {
+  replyState = await api("/api/dm/replies");
+  renderReplies();
+  updateDmPolling();
+}
+function renderReplies() {
+  const section = $("replies");
+  section.hidden = !replyState || !replyState.accounts.length;
+  if (section.hidden) return;
+  const accounts = replyState.accounts;
+  if (!accounts.some((item) => item.profile_id === replyAccount)) {
+    const stored = readStoredAccount();
+    replyAccount = (accounts.find((item) => item.profile_id === stored) || accounts.find((item) => item.new) || accounts[0]).profile_id;
+  }
+  const tabs = $("replies-accounts");
+  tabs.replaceChildren();
+  for (const item of accounts) {
+    const tab = element("button", undefined, "reply-tab");
+    tab.type = "button"; tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(item.profile_id === replyAccount));
+    tab.append(element("span", accountLabel(item)));
+    if (item.new) tab.append(element("span", String(item.new), "reply-count"));
+    tab.addEventListener("click", () => { replyAccount = item.profile_id; storeAccount(item.profile_id); renderReplies(); });
+    tabs.append(tab);
+  }
+  tabs.hidden = accounts.length < 2 && !accounts[0].new;
+
+  const current = accounts.find((item) => item.profile_id === replyAccount);
+  const parts = [];
+  let bad = false;
+  if (current.checking) parts.push("Inbox check ho raha hai… 1–2 minute mein yahan dikhega.");
+  else if (current.checked_at) parts.push(`Aakhri check: ${formatWhen(current.checked_at)}.`);
+  else parts.push("Abhi tak check nahi hua.");
+  if (!current.checking && current.check_status && current.check_status !== "ok") {
+    parts.push(DM_PAUSES[current.check_status] || REPLY_CHECK_PROBLEMS[current.check_status] || messages[current.check_status] || "Pichhla check nahi ho paya.");
+    bad = true;
+  }
+  if (current.answering) parts.push(`${current.answering} jawab bhej rahe hain…`);
+  if (current.cost_inr) parts.push(`Replies ka kharcha: ${rupees(current.cost_inr)}.`);
+  if (!current.checking) parts.push("DM chalte waqt har 30 minute mein apne aap check hota hai; alag se check karne par ~₹2 lagte hain.");
+  $("replies-status").textContent = parts.join(" ");
+  $("replies-status").classList.toggle("bad", bad);
+  $("replies-check").disabled = current.checking || !replyState.configured;
+  $("replies-check").textContent = current.checking ? "Check ho raha hai…" : "Abhi check karo";
+  for (const chip of document.querySelectorAll(".reply-chip")) {
+    chip.setAttribute("aria-pressed", String(chip.dataset.filter === replyFilter));
+    if (chip.dataset.filter === "new") chip.textContent = current.new ? `Naye (${current.new})` : "Naye";
+  }
+
+  const list = $("replies-list");
+  list.replaceChildren();
+  const shown = replyState.replies.filter((reply) => reply.profile_id === replyAccount && (replyFilter === "all" || reply.status === "new"));
+  if (!shown.length) {
+    list.append(element("p", replyFilter === "new" ? "Koi naya reply nahi. Jinhe jawab de chuke ho, wo “Sab” mein hain." : "Is account par abhi koi reply nahi aaya.", "empty"));
+  }
+  for (const reply of shown) list.append(replyCard(reply));
+}
+function replyCard(reply) {
+  const card = element("article", undefined, `job-card reply-card${reply.status === "new" ? " fresh" : ""}`);
+  const head = element("div", undefined, "job-head");
+  let who;
+  if (reply.username) {
+    who = element("a", `@${reply.username}`);
+    who.href = `https://www.instagram.com/${encodeURIComponent(reply.username)}/`; who.target = "_blank"; who.rel = "noopener noreferrer";
+  } else {
+    who = element("strong", reply.name || "Instagram user");
+  }
+  head.append(who, element("span", REPLY_BADGES[reply.status] || reply.status, `badge ${reply.status}`));
+  card.append(head);
+  const meta = [reply.username && reply.name ? reply.name : null, formatWhen(reply.received_at)].filter(Boolean).join(" · ");
+  card.append(element("p", meta, "job-meta"), element("p", reply.text, "reply-text"));
+  for (const answer of reply.answers) {
+    const line = element("p", `Tum: ${answer.message}`, `reply-answer ${answer.status}`);
+    const state = answer.status === "sent" ? `Gaya ✓ ${answer.sent_at ? formatWhen(answer.sent_at) : ""}`
+      : answer.status === "failed" ? `Nahi gaya: ${ANSWER_REASONS[answer.reason] || DM_REASONS[answer.reason] || DM_PAUSES[answer.reason] || messages[answer.reason] || answer.reason || "pata nahi"}`
+      : "Bhej rahe hain… (1–2 minute)";
+    line.append(element("small", state.trim()));
+    card.append(line);
+  }
+
+  const form = element("div", undefined, "reply-form");
+  const box = document.createElement("textarea");
+  box.rows = 2; box.maxLength = 1000; box.spellcheck = true;
+  box.placeholder = "Jawab likho…";
+  box.setAttribute("aria-label", `${reply.username ? `@${reply.username}` : reply.name || "Creator"} ko jawab`);
+  box.value = replyDrafts.get(reply.id) || "";
+  box.addEventListener("input", () => { if (box.value) replyDrafts.set(reply.id, box.value); else replyDrafts.delete(reply.id); });
+  const actions = element("div", undefined, "dm-actions");
+  const send = element("button", "Bhejo", "quiet strong"); send.type = "button"; send.disabled = !replyState.configured;
+  send.addEventListener("click", async () => {
+    const message = box.value.trim();
+    if (!message) { box.focus(); return; }
+    send.disabled = true;
+    try {
+      replyState = await api(`/api/dm/replies/${encodeURIComponent(reply.id)}/answer`, { method: "POST", body: JSON.stringify({ message }) });
+      replyDrafts.delete(reply.id);
+      renderReplies();
+      updateDmPolling();
+      notice("Jawab line mein hai. 1–2 minute mein usi account se chala jayega.");
+    } catch (error) { explain(error); send.disabled = false; }
+  });
+  actions.append(send);
+  if (reply.status !== "done") {
+    const done = element("button", "Ho gaya", "quiet"); done.type = "button";
+    done.addEventListener("click", async () => {
+      done.disabled = true;
+      try { replyState = await api(`/api/dm/replies/${encodeURIComponent(reply.id)}/done`, { method: "POST", body: "{}" }); renderReplies(); }
+      catch (error) { explain(error); done.disabled = false; }
+    });
+    actions.append(done);
+  }
+  form.append(box, actions);
+  card.append(form);
+  return card;
+}
+$("replies-check").addEventListener("click", async () => {
+  const button = $("replies-check");
+  button.disabled = true;
+  try {
+    replyState = await api("/api/dm/replies/check", { method: "POST", body: JSON.stringify({ profile_id: replyAccount }) });
+    renderReplies();
+    updateDmPolling();
+    notice("Inbox check shuru hua. 1–2 minute mein replies yahan dikhenge.");
+  } catch (error) { explain(error); button.disabled = false; }
+});
+for (const chip of document.querySelectorAll(".reply-chip")) {
+  chip.addEventListener("click", () => { replyFilter = chip.dataset.filter; renderReplies(); });
 }
 
 async function loadDmProfiles() {

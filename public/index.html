@@ -127,6 +127,19 @@
           <div><h2>DM Sender</h2><p class="muted">Jin creators ne promotion ke liye comment kiya, unhe aapke account se ek-ek karke message.</p></div>
           <button id="dm-reload" class="quiet" type="button">Refresh</button>
         </div>
+        <section id="replies" class="replies" aria-labelledby="replies-title" hidden>
+          <div class="replies-head">
+            <h3 id="replies-title">Replies</h3>
+            <button id="replies-check" class="quiet strong" type="button">Abhi check karo</button>
+          </div>
+          <div id="replies-accounts" class="reply-tabs" role="tablist" aria-label="Instagram account"></div>
+          <p id="replies-status" class="hint"></p>
+          <div class="reply-filter" role="group" aria-label="Kaunse replies dikhayein">
+            <button type="button" class="reply-chip" data-filter="new" aria-pressed="true">Naye</button>
+            <button type="button" class="reply-chip" data-filter="all" aria-pressed="false">Sab</button>
+          </div>
+          <div id="replies-list" class="jobs"></div>
+        </section>
         <details id="check-panel" class="add-account dm-new">
           <summary><span class="plus" aria-hidden="true">+</span>Creator list check · active / purane / nahi mile</summary>
           <div class="dm-form">
