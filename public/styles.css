@@ -692,3 +692,19 @@ footer a { color: var(--marigold-text); }
   .today-item strong { font-size: 32px; }
   .subnav-bar { margin: 0; padding: 12px 0 10px; }
 }
+
+/* Telegram link and saved answers (Replies page) */
+.tg-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 16px; padding: 14px 16px; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--slate); }
+.tg-card > div:first-child { flex: 1 1 260px; min-width: 0; }
+.tg-card strong { font-size: 16px; }
+.tg-card .hint { margin-top: 3px; }
+.tg-card.linked { border-color: color-mix(in srgb, var(--leaf) 45%, var(--seam)); }
+.tg-card.linked strong { color: var(--leaf); }
+.tg-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.template-list { margin-top: 6px; }
+.template-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--seam); font-size: 14.5px; }
+.template-row:first-child { border-top: 0; }
+.template-row > div { min-width: 0; }
+.template-row p { margin: 2px 0 0; color: var(--haze); white-space: pre-wrap; overflow-wrap: anywhere; }
+.reply-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.reply-quick .reply-chip { min-height: 32px; font-size: 13.5px; }
