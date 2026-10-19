@@ -1225,6 +1225,7 @@ const DM_REASONS = {
   focus_failed: "Message box nahi mila",
   typing_failed: "Message type nahi ho paya",
   send_unconfirmed: "Gaya ya nahi, confirm nahi hua · Instagram mein check karo",
+  not_delivered: "DM nahi pahuncha (sirf followers se message leta hai)",
   browser_lost: "Browser connection toot gaya",
   page_error: "Page mein error aaya"
 };

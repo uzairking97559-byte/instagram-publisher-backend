@@ -264,6 +264,9 @@ CREATE TABLE IF NOT EXISTS dm_replies (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (profile_id, thread)
 );
+-- 'undelivered': Instagram's "could not be sent" notice, not a reply (hidden).
+ALTER TABLE dm_replies DROP CONSTRAINT IF EXISTS dm_replies_status_check;
+ALTER TABLE dm_replies ADD CONSTRAINT dm_replies_status_check CHECK (status IN ('new', 'answered', 'done', 'undelivered'));
 CREATE INDEX IF NOT EXISTS dm_replies_key_idx ON dm_replies(profile_id, row_key);
 CREATE TABLE IF NOT EXISTS dm_outbox (
   id BIGSERIAL PRIMARY KEY,

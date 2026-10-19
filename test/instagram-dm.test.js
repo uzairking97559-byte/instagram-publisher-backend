@@ -15,7 +15,9 @@ const { createInstagramDriver } = require("../lib/instagram-dm");
 
 const CHROME = process.env.DM_TEST_CHROME;
 const MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views. Interested? Reply YES and I'll share the details!";
-const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, dialog: 1000, poll: 100 };
+const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, dialog: 1000, delivery: 800, poll: 100 };
+// Instagram's notice when a message cannot reach someone.
+const NOTICE = "This account can't receive your message because they don't allow new message requests from everyone.";
 
 function page(body) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<script>${SCRIPT}</script></body></html>`;
@@ -24,7 +26,9 @@ function page(body) {
 // messages, and a contenteditable box where Enter sends.
 const SCRIPT = `
 function bubble(list, text) { const b = document.createElement('div'); b.className = 'bubble'; const s = document.createElement('span'); s.textContent = text; b.append(s); list.append(b); }
-function openChat(user, old) {
+// closed: the person takes messages only from people they follow; Instagram
+// shows the message, then its "can't receive" notice under it.
+function openChat(user, old, closed) {
   const panel = document.createElement('section');
   panel.innerHTML = '<div class="chat-head"></div><div class="list"></div><div><div role="textbox" contenteditable="true" aria-label="Message"></div></div>';
   panel.querySelector('.chat-head').textContent = user + ' · Instagram';
@@ -41,6 +45,7 @@ function openChat(user, old) {
       document.body.append(dialog); return;
     }
     setTimeout(() => { bubble(list, text); box.textContent = ''; }, 150);
+    if (closed) setTimeout(() => { const n = document.createElement('div'); n.className = 'notice'; n.textContent = window.NOTICE; list.append(n); }, 450);
   });
   document.body.append(panel);
 }
@@ -91,7 +96,7 @@ if (window.INBOX) {
       if (window.THREADS) { const thread = window.THREADS.find((item) => item.user === chosen); setTimeout(() => openThread(thread.id), 150); return; }
       for (const old of document.querySelectorAll('section')) old.remove();
       history.pushState(null, '', '/direct/t/' + chosen + '/');
-      setTimeout(() => openChat(users[chosen].name, users[chosen].old), 150);
+      setTimeout(() => openChat(users[chosen].name, users[chosen].old, users[chosen].closed), 150);
     });
     dialog.querySelector('.x').addEventListener('click', () => dialog.remove());
     document.body.append(dialog);
@@ -127,6 +132,7 @@ function openThread(id) {
   if (thread.link === false) msgs.innerHTML = '<div class="card"><div>' + thread.name + '</div><a href="/' + thread.user + '/" role="link">View profile</a></div>';
   thread.msgs.forEach((m, i) => {
     if (i === 1) { const d = document.createElement('div'); d.className = 'date'; d.textContent = 'Today 10:45 PM'; msgs.append(d); }
+    if (m.notice) { const n = document.createElement('div'); n.className = 'date'; n.textContent = m.text; msgs.append(n); return; }
     add(m.text, m.me);
     if (m.me && i === thread.msgs.length - 1) { const s = document.createElement('div'); s.className = 'seen'; s.textContent = 'Seen'; msgs.append(s); }
   });
@@ -157,7 +163,8 @@ const THREADS = [
   { id: "2", user: "dave", name: "Dave D", msgs: [{ me: true, text: OURS("dave") }] },
   { id: "3", user: "erin", name: "Erin E", link: false, msgs: [{ text: "Hello? Anyone there" }] },
   { id: "4", user: "frank", name: "Frank F", msgs: [{ me: true, text: OURS("frank") }, { text: "ok" }] },
-  { id: "5", user: "gina", name: "Gina G", seen: true, msgs: [{ me: true, text: OURS("gina") }] }
+  { id: "5", user: "gina", name: "Gina G", seen: true, msgs: [{ me: true, text: OURS("gina") }] },
+  { id: "6", user: "hana", name: "Hana H", msgs: [{ me: true, text: OURS("hana") }, { notice: true, text: NOTICE }] }
 ];
 const THREADS_PAGE = page(`<style>
   body { margin: 0; display: flex; height: 100vh; font: 14px sans-serif; }
@@ -189,7 +196,8 @@ function site(requests, inbox = "ok") {
     "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
     "/vanish/": profile("vanish", { setup: "window.VANISH = true;" }),
     "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>'),
-    "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] } })};` +
+    "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] },
+      closed3: { name: "Closed Three", old: [], closed: true } })}; window.NOTICE = ${JSON.stringify(NOTICE)};` +
       `window.INBOX_MODE = ${JSON.stringify(inbox)};</script>` +
       '<nav><div role="button" tabindex="0" data-compose><svg aria-label="New message" role="img" width="24" height="24"></svg></div></nav><img src="/picture.png" alt="">')
   };
@@ -287,6 +295,8 @@ test("sends from the Direct inbox, loading the inbox page only once", { skip: !C
   assert.deepEqual([missing.status, missing.reason], ["skipped", "not_found"], "no such account in the search");
   assert.match(missing.detail, /^typed=carol3 text=New message/);
   assert.deepEqual(await send("alice3", "A second short hello for alice3"), { status: "sent" });
+  // The message shows, then Instagram says it cannot reach them: not a sent DM.
+  assert.deepEqual(await send("closed3"), { status: "skipped", reason: "not_delivered" });
   await session.idle();
   assert.equal(requests.filter((url) => url === "/direct/inbox/").length, 1, "the inbox page loads once");
   assert.equal(requests.includes("/picture.png"), false);
@@ -334,7 +344,7 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   const { requests, baseUrl } = await serve(t, "threads");
   const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
   t.after(() => session.close());
-  const sentTo = { carol: [OURS("carol")], frank: [OURS("frank")] };
+  const sentTo = { carol: [OURS("carol")], frank: [OURS("frank")], hana: [OURS("hana")] };
 
   const check = await session.readReplies({
     outgoing: async (username) => sentTo[username] || [],
@@ -342,14 +352,17 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   });
   assert.equal(check.status, "ok");
   assert.equal(check.account, "aiglow.test");
-  // Carol, Erin and Frank wrote last; Dave's preview is ours, Gina's says Seen.
-  assert.deepEqual([check.rows, check.waiting, check.skipped], [5, 3, 1]);
+  // Carol, Erin and Frank wrote last, Hana's chat ends in Instagram's notice;
+  // Dave's preview is ours, Gina's says Seen.
+  assert.deepEqual([check.rows, check.waiting, check.skipped], [6, 4, 1]);
   assert.match(check.detail, /^O:You: Hi dave \| T:Yes interes|T:How to join/);
   assert.deepEqual(check.replies.map(({ key, ...reply }) => reply), [
     // Only what came after our message: not the date, our "Seen" or the box's placeholder.
-    { name: "Carol C", username: "carol", thread: "/direct/t/1/", text: "Yes interested\nHow to join?", matched: true },
+    { name: "Carol C", username: "carol", thread: "/direct/t/1/", text: "Yes interested\nHow to join?", matched: true, kind: "reply" },
     // No message of ours to start from: the list's preview. Username from "View profile".
-    { name: "Erin E", username: "erin", thread: "/direct/t/3/", text: "Hello? Anyone there", matched: false }
+    { name: "Erin E", username: "erin", thread: "/direct/t/3/", text: "Hello? Anyone there", matched: false, kind: "reply" },
+    // Not a reply: our DM never reached Hana.
+    { name: "Hana H", username: "hana", thread: "/direct/t/6/", text: NOTICE, matched: true, kind: "undelivered" }
   ]);
   assert.equal(check.replies[0].key, "Carol C|How to join?");
 
@@ -362,5 +375,5 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
 
   // After our answer Carol's chat shows our message last and is not listed again.
   const again = await session.readReplies({ outgoing: async (username) => sentTo[username] || [], known: async () => false });
-  assert.deepEqual(again.replies.map((reply) => reply.username), ["erin"]);
+  assert.deepEqual(again.replies.map((reply) => reply.username), ["erin", "hana"]);
 });
