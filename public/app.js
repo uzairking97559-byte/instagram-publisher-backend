@@ -1860,7 +1860,8 @@ const CHECK_PAUSES = {
   permission_required: "Facebook wali permission chahiye. Upar “Facebook se permission do” dabao, phir Start.",
   reconnect_required: "Facebook connection ka login expire ho gaya. Upar wale button se dobara connect karo, phir Start.",
   token_storage_unavailable: "Saved connection padha nahi ja raha. Setup check karna hoga.",
-  too_many_not_found: "Lagatar 40 naam “nahi mile” aaye. Kuch gadbad lagti hai, check ruka hai."
+  too_many_not_found: "Lagatar 40 naam “nahi mile” aaye. Kuch gadbad lagti hai, check ruka hai.",
+  facebook_required: "Meta ne Instagram login wale account se ye check nahi karne diya. Iske liye Facebook se permission chahiye (upar wala button)."
 };
 let checkState = null;
 let checkFileText = "";
@@ -1933,6 +1934,10 @@ function renderChecks() {
   if (!checkState) return;
   $("check-rate").textContent = String(checkState.per_hour);
   $("check-connect").hidden = checkState.connected;
+  // No Facebook connection yet: an Instagram Login account is tried instead.
+  $("check-fallback").hidden = checkState.connected || !checkState.fallback_account;
+  $("check-fallback").textContent = checkState.fallback_account
+    ? `Facebook connection na hone tak @${checkState.fallback_account} (Instagram login) se try hoga. Meta mana kare to check ruk jayega aur Facebook wala tarika chahiye hoga.` : "";
   for (const check of checkState.checks) list.append(checkCard(check));
   // With no list yet, the form is the first thing to fill.
   if (!checkState.checks.length) $("check-new").open = true;

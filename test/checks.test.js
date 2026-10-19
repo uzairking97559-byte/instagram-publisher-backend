@@ -118,3 +118,35 @@ test("an expired connection pauses the check and asks for a reconnect", async (t
   assert.deepEqual((await h.request(`/api/checks/${id}`, { method: "DELETE", cookie })).data, { ok: true });
   assert.equal((await h.request(`/api/checks/${id}`, { cookie })).status, 404);
 });
+
+test("without a Facebook connection, the check tries an Instagram Login account and stops if Meta refuses", async (t) => {
+  const seen = [];
+  const clock = { now: new Date("2026-10-18T06:00:00Z") };
+  let supported = false;
+  const h = await harness(t, {
+    meta: (url, init) => {
+      seen.push(`${url.hostname}${url.pathname}`);
+      assert.equal(url.hostname, "graph.instagram.com", "an Instagram Login token goes to graph.instagram.com");
+      assert.equal(init.headers.Authorization, "Bearer test-only-page-token");
+      if (!supported) return json({ error: { code: 100, message: "Tried accessing nonexisting field (business_discovery)" } }, 400);
+      return json({ business_discovery: { username: "fresh", followers_count: 50, media_count: 3, media: { data: [{ timestamp: clock.now.toISOString() }] } } });
+    },
+    checkOptions: { now: () => clock.now, intervalMs: 0 }
+  });
+  const cookie = await h.login();
+  await h.account("instagram", IG_ID, { username: "yzairr_" });
+  const status = (await h.request("/api/checks", { cookie })).data;
+  assert.deepEqual([status.connected, status.fallback_account], [false, "yzairr_"]);
+  const id = (await h.request("/api/checks", { method: "POST", cookie, body: { name: "Sheet", usernames: "fresh\nother" } })).data.check.id;
+  await h.app.locals.runCheckWorker();
+  assert.deepEqual(seen, [`graph.instagram.com/${seen[0].split("/")[1]}/${IG_ID}`]);
+  let check = (await h.request(`/api/checks/${id}`, { cookie })).data;
+  assert.deepEqual([check.check.status, check.check.pause_reason, check.check.counts.pending], ["paused", "facebook_required", 2], "nothing is marked when Meta refuses");
+
+  // If Meta does answer, the check runs on that account.
+  supported = true;
+  await h.request(`/api/checks/${id}/start`, { method: "POST", cookie, body: {} });
+  await h.app.locals.runCheckWorker();
+  check = (await h.request(`/api/checks/${id}`, { cookie })).data;
+  assert.equal(check.check.counts.active, 1);
+});
