@@ -346,3 +346,89 @@ CREATE TABLE IF NOT EXISTS creator_check_items (
   UNIQUE (check_id, username)
 );
 CREATE INDEX IF NOT EXISTS creator_check_items_queue_idx ON creator_check_items(check_id, status, position);
+
+-- Creator finder (lib/finder.js): from a few seed creators, reads each
+-- profile's public numbers and Instagram's "Similar accounts", from a separate
+-- Instagram login kept in its own Browser Use profile (never a DM account).
+-- The results are a list to review; nobody is messaged from here.
+CREATE TABLE IF NOT EXISTS finder_runs (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  profile_id UUID NOT NULL,
+  profile_name TEXT,
+  min_followers INTEGER NOT NULL DEFAULT 10000 CHECK (min_followers BETWEEN 0 AND 1000000000),
+  max_followers INTEGER CHECK (max_followers IS NULL OR max_followers BETWEEN 0 AND 1000000000),
+  active_days INTEGER NOT NULL DEFAULT 30 CHECK (active_days BETWEEN 1 AND 365),
+  depth INTEGER NOT NULL DEFAULT 2 CHECK (depth BETWEEN 1 AND 3),
+  daily_limit INTEGER NOT NULL DEFAULT 100 CHECK (daily_limit BETWEEN 10 AND 300),
+  gap_seconds INTEGER NOT NULL DEFAULT 60 CHECK (gap_seconds BETWEEN 30 AND 600),
+  start_hour INTEGER NOT NULL DEFAULT 9 CHECK (start_hour BETWEEN 0 AND 23),
+  end_hour INTEGER NOT NULL DEFAULT 23 CHECK (end_hour BETWEEN 1 AND 24),
+  proxy TEXT NOT NULL DEFAULT 'in' CHECK (proxy ~ '^([a-z]{2}|none)$'),
+  warmup BOOLEAN NOT NULL DEFAULT TRUE,
+  stop_after INTEGER CHECK (stop_after IS NULL OR stop_after BETWEEN 1 AND 1000),
+  read_since_start INTEGER NOT NULL DEFAULT 0,
+  consecutive_errors INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('running', 'paused', 'completed')),
+  pause_reason TEXT,
+  pause_detail TEXT,
+  next_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- depth 0: a seed; mentions: how many read profiles listed it as similar.
+-- source: 'api' or 'page' (read now), 'cache' (copied from a reading under 14 days old).
+CREATE TABLE IF NOT EXISTS finder_candidates (
+  id BIGSERIAL PRIMARY KEY,
+  run_id BIGINT NOT NULL REFERENCES finder_runs(id) ON DELETE CASCADE,
+  username TEXT NOT NULL CHECK (username ~ '^[a-z0-9._]{1,30}$'),
+  depth INTEGER NOT NULL DEFAULT 0,
+  mentions INTEGER NOT NULL DEFAULT 0,
+  via TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'reading', 'done', 'not_found', 'failed')),
+  reason TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  name TEXT,
+  followers INTEGER,
+  following INTEGER,
+  posts INTEGER,
+  private BOOLEAN,
+  professional BOOLEAN,
+  verified BOOLEAN,
+  category TEXT,
+  bio TEXT,
+  last_post_at TIMESTAMPTZ,
+  avg_views INTEGER,
+  related TEXT[],
+  source TEXT,
+  match BOOLEAN NOT NULL DEFAULT FALSE,
+  review TEXT CHECK (review IS NULL OR review IN ('approved', 'rejected')),
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (run_id, username)
+);
+CREATE INDEX IF NOT EXISTS finder_candidates_queue_idx ON finder_candidates(run_id, status, depth, mentions DESC, id);
+CREATE INDEX IF NOT EXISTS finder_candidates_username_idx ON finder_candidates(username, status, read_at);
+CREATE TABLE IF NOT EXISTS finder_browsers (
+  id UUID PRIMARY KEY,
+  profile_id UUID NOT NULL,
+  run_id BIGINT REFERENCES finder_runs(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped')),
+  profiles_read INTEGER NOT NULL DEFAULT 0,
+  proxy_mb NUMERIC NOT NULL DEFAULT 0,
+  proxy_cost_usd NUMERIC NOT NULL DEFAULT 0,
+  browser_cost_usd NUMERIC NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  stopped_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS finder_browsers_run_idx ON finder_browsers(run_id);
+-- Per finder account: its last Instagram warning (warm-up starts again lower).
+CREATE TABLE IF NOT EXISTS finder_accounts (
+  profile_id UUID PRIMARY KEY,
+  last_warning_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS finder_worker_lease (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  owner TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);

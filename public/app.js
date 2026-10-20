@@ -70,12 +70,12 @@ let storage = null;
 const ALL_ACCOUNTS = "all";
 // Three parts, each with its own pages: the bottom bar (left rail on a computer)
 // picks the part, the tabs under "Aaj" pick the page.
-const SECTIONS = { posting: ["connections", "composer", "activity"], messages: ["replies", "campaigns", "dm-create"], creators: ["creators"] };
+const SECTIONS = { posting: ["connections", "composer", "activity"], messages: ["replies", "campaigns", "dm-create"], creators: ["finder", "creators"] };
 const VIEWS = Object.values(SECTIONS).flat();
 const sectionOf = (view) => Object.keys(SECTIONS).find((key) => SECTIONS[key].includes(view));
 // The page last open in each part, so going back to a part returns to it.
 const lastView = (() => {
-  const saved = { posting: "connections", messages: "replies", creators: "creators" };
+  const saved = { posting: "connections", messages: "replies", creators: "finder" };
   try { Object.assign(saved, JSON.parse(readSetting("publisher-last-views") || "{}")); } catch { /* ignore */ }
   for (const key of Object.keys(SECTIONS)) if (!SECTIONS[key].includes(saved[key])) saved[key] = SECTIONS[key][0];
   return saved;
@@ -164,6 +164,7 @@ function showView(name) {
   if (location.hash !== `#${name}`) history.replaceState(null, "", `${location.pathname}#${name}`);
   if (section !== "posting") void loadDm().catch(explain); else updateDmPolling();
   if (name === "dm-create" && dmState?.configured && !dmProfilesLoaded) void loadDmProfiles();
+  if (name === "finder" && !finderProfilesLoaded) void loadFinderProfiles();
   // Start the new page from its top, keeping today's numbers in view.
   const top = $("workspace").getBoundingClientRect().top + window.scrollY;
   if (!$("workspace").hidden && window.scrollY > top) window.scrollTo({ top });
@@ -1069,7 +1070,8 @@ $("logout").addEventListener("click", async () => {
     accounts = []; jobs = []; progress = []; accountsLoaded = false; jobsScope = null;
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
-    renderDm(); renderChecks(); renderReplies(); currentView = null;
+    finderState = null; finderProfilesLoaded = false; finderOpen.clear(); finderFilter.clear(); finderResults.clear();
+    renderDm(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1307,6 +1309,7 @@ async function loadDm() {
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && currentView === "dm-create") void loadDmProfiles();
   void loadChecks().catch(() => {});
+  void loadFinder().catch(() => {});
   void loadReplies().catch(() => {});
 }
 function renderDm() {
@@ -1324,13 +1327,14 @@ function renderDm() {
 function updateDmPolling() {
   const active = sectionOf(currentView) !== "posting" && !$("workspace").hidden && (Boolean(dmState?.campaigns.some((campaign) => campaign.status === "running")) ||
     Boolean(checkState?.checks.some((check) => check.status === "running")) ||
+    Boolean(finderState?.runs.some((run) => run.status === "running")) ||
     Boolean(replyState?.accounts.some((account) => account.checking || account.answering)));
   if (active && !dmPollTimer) {
     dmPollTimer = setInterval(() => {
       if ($("workspace").hidden || sectionOf(currentView) === "posting") { updateDmPolling(); return; }
       // Don't redraw the cards while the owner is typing in one of them.
       const focused = document.activeElement;
-      if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused)) && focused.matches("input, textarea, select")) return;
+      if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused) || $("finder").contains(focused)) && focused.matches("input, textarea, select")) return;
       void loadDm().catch(explain);
     }, 20000);
   }
@@ -1965,6 +1969,330 @@ $("check-form").addEventListener("submit", async (event) => {
     notice(`List check shuru: ${data.added} usernames${data.invalid.length ? `, ${data.invalid.length}+ galat entries chhodi` : ""}. Website ab khud check karti rahegi, page band kar sakte ho.`);
     $("check-name").value = ""; $("check-text").value = ""; $("check-file").value = ""; checkFileText = ""; updateCheckCount();
     await loadChecks();
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+// ---- Creator finder: new creators from seeds and Instagram's "Similar accounts" ----
+Object.assign(messages, {
+  invalid_finder: "Naam, profile, followers (kam se kam, zyada se zyada se chhota), 1–365 din, roz 10–300 profiles, gap 30–600 second aur alag shuru/band time check karo.",
+  invalid_seeds: "Kam se kam ek sahi Instagram username ya profile link daalo.",
+  too_many_seeds: "Ek baar mein 50 seeds tak daal sakte ho.",
+  finder_not_found: "Ye search nahi mili. Refresh karo.",
+  finder_running: "Chalti search ko badal ya delete nahi kar sakte. Pehle Pause karo.",
+  profile_is_dm: "Is profile se DM campaign chalta hai. Finder ke liye alag Instagram account aur alag Browser Use profile chahiye.",
+  profile_is_finder: "Ye profile creator finder ka hai. DM ke liye apna DM wala profile chuno.",
+  nothing_to_read: "Is search mein dekhne ko koi profile nahi bacha. Aur seeds jodo.",
+  finder_not_configured: "Browser Use key set nahi hai. Render → Environment mein BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
+  invalid_review: "Ye creator nahi mila. Refresh karo."
+});
+const FINDER_PAUSES = {
+  not_started: "Abhi shuru nahi hui. Pehle “Pehle 50 (test)” chunkar Start dabao.",
+  owner: "Aapne pause kiya hai.",
+  test_done: "Test poora hua. Neeche results dekho; theek lage to “Sab baaki” chunkar Start.",
+  rate_limited: "Instagram ne profiles kholne ki limit lagayi, isliye search ruk gayi. 24 ghante ruko, phir gap badhakar Start karo.",
+  logged_out: "Is profile mein Instagram login nahi mila. Browser Use profile mein dobara login karo, phir Start.",
+  challenge: "Instagram security check maang raha hai. Us account ko Instagram app mein khud verify karo, phir Start.",
+  too_many_errors: "Lagatar 5 profiles nahi khule, isliye search ruk gayi. Thodi der baad Start karo."
+};
+const FINDER_PROBLEMS = new Set(["rate_limited", "logged_out", "challenge", "too_many_errors", "browser_use_key_invalid", "browser_use_no_credits", "browser_use_not_found"]);
+const FINDER_FILTERS = [["match", "Fit"], ["approved", "Pasand"], ["other", "Fit nahi"], ["queue", "Line mein"]];
+let finderState = null;
+let finderProfilesLoaded = false;
+const finderOpen = new Map(); // search id -> results open
+const finderFilter = new Map(); // search id -> chosen filter
+const finderResults = new Map(); // "id:filter" -> creators
+
+// 950, 12.5K, 1.2M
+function compact(value) {
+  if (value === null || value === undefined) return "–";
+  const amount = Number(value);
+  const short = (number, unit) => `${number.toFixed(number >= 100 ? 0 : 1).replace(/\.0$/, "")}${unit}`;
+  if (amount >= 1e6) return short(amount / 1e6, "M");
+  if (amount >= 1e3) return short(amount / 1e3, "K");
+  return String(amount);
+}
+function lastPost(value) {
+  if (!value) return "koi post nahi dikhi";
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
+  return days <= 0 ? "aaj post" : days === 1 ? "kal post" : `${days} din pehle post`;
+}
+async function loadFinder() {
+  finderState = await api("/api/finder");
+  renderFinder();
+}
+function renderFinder() {
+  const list = $("finder-list");
+  list.replaceChildren();
+  if (!finderState) return;
+  $("finder-setup").hidden = finderState.configured;
+  if (!finderState.runs.length) {
+    list.append(element("p", "Abhi koi search nahi hai. Neeche “Nayi search banao” kholo.", "empty"));
+    $("finder-new").open = true;
+  }
+  for (const run of finderState.runs) list.append(finderCard(run));
+  updateDmPolling();
+}
+async function finderAction(button, path, body, done) {
+  button.disabled = true;
+  try {
+    const data = await api(path, { method: body === null ? "DELETE" : "POST", ...(body === null ? {} : { body: JSON.stringify(body) }) });
+    if (done) done(data);
+    await loadFinder();
+  } catch (error) { explain(error); button.disabled = false; }
+}
+function finderCard(run) {
+  const counts = run.counts;
+  const card = element("article", undefined, "job-card dm-card");
+  const head = element("div", undefined, "job-head");
+  head.append(element("strong", run.name), element("span", DM_BADGES[run.status] || run.status, `badge ${run.status}`));
+  const who = run.profile_name || `Profile ${run.profile_id.slice(0, 8)}`;
+  const range = run.max_followers ? `${compact(run.min_followers)}–${compact(run.max_followers)}` : `${compact(run.min_followers)}+`;
+  const perDay = run.warmup && run.today_limit < run.daily_limit ? `${run.today_limit}/din (warm-up)` : `${run.daily_limit}/din`;
+  card.append(head, element("p", `${who} · ${range} followers · post ${run.active_days} din mein · ${run.depth} level · ${perDay} · ${run.gap_seconds}s gap · ${hourLabel(run.start_hour)}–${hourLabel(run.end_hour)} · ${proxyLabel(run.proxy || "in")}`, "job-meta"));
+
+  const seen = counts.read + counts.missing;
+  const progress = element("section", undefined, "batch-progress");
+  const heading = element("div", undefined, "batch-progress-heading");
+  heading.append(element("strong", `${seen}/${counts.total} profiles dekhe`), element("span", `${counts.pending} line mein`));
+  const bar = document.createElement("progress");
+  bar.className = "progress-bar"; bar.max = Math.max(1, counts.total); bar.value = seen;
+  bar.setAttribute("aria-label", `${seen} of ${counts.total} profiles read`);
+  progress.append(heading, bar);
+  const stats = element("div", undefined, "stats");
+  for (const [value, label, tone] of [[counts.matched, "Fit", "good"], [counts.approved, "Pasand", ""], [counts.pending, "Line mein", ""], [counts.missing, "Nahi mile", ""]]) {
+    const stat = element("div", undefined, tone ? `stat ${tone}` : "stat");
+    stat.append(element("strong", String(value)), element("span", label));
+    stats.append(stat);
+  }
+  card.append(progress, stats);
+  if (run.status === "running") {
+    const parts = [`Aaj ${counts.read_today}/${run.today_limit}`];
+    if (run.next_read_at) parts.push(`Agla profile: ${formatWhen(run.next_read_at)}`);
+    if (run.stop_after) parts.push(`Test: ${run.read_since_start}/${run.stop_after}`);
+    card.append(element("p", parts.join(" · "), "next-reel"));
+  }
+  const cost = run.cost;
+  card.append(element("p", `Kharcha: ${rupees(cost.inr)}${cost.per_100_inr !== null ? ` · ${rupees(cost.per_100_inr)} har 100 profile` : ""} · ${cost.proxy_mb} MB data${run.browser_active ? " · browser abhi khula hai" : ""}`, "dm-cost"));
+  if (run.status === "paused" && run.pause_reason) {
+    const text = FINDER_PAUSES[run.pause_reason] || messages[run.pause_reason] || "Search ruki hui hai.";
+    const detail = run.pause_detail ? ` Instagram ne likha: “${run.pause_detail}”` : "";
+    card.append(element("p", text + detail, FINDER_PROBLEMS.has(run.pause_reason) ? "batch-error" : ""));
+  }
+  if (run.status === "completed") card.append(element("p", "Search poori ho gayi. Aur seeds jodkar aage badha sakte ho."));
+
+  const actions = element("div", undefined, "dm-actions");
+  if (run.status === "running") {
+    const pause = element("button", "Pause karo", "quiet"); pause.type = "button";
+    pause.addEventListener("click", () => finderAction(pause, `/api/finder/${run.id}/pause`, {}, () => notice("Search pause ho gayi.")));
+    actions.append(pause);
+  } else if (counts.pending) {
+    const amount = frameSelect([[50, "Pehle 50 (test)"], [100, "Sirf 100"], ["", `Sab baaki (${counts.pending}+)`]], seen ? "" : 50);
+    amount.className = "dm-amount"; amount.setAttribute("aria-label", "Kitne profiles dekhne hain");
+    const start = element("button", "Start", "quiet strong"); start.type = "button"; start.disabled = !finderState.configured;
+    start.addEventListener("click", () => {
+      const stopAfter = amount.value ? Number(amount.value) : null;
+      void finderAction(start, `/api/finder/${run.id}/start`, { stop_after: stopAfter },
+        () => notice(stopAfter ? `Start ho gaya: ${stopAfter} profiles ke baad apne aap rukega. Page band kar sakte ho.` : "Start ho gaya. Page band kar sakte ho, search server par chalti rahegi."));
+    });
+    actions.append(amount, start);
+  }
+  if (run.status !== "running") {
+    const remove = element("button", "Delete", "quiet danger"); remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (!confirm(`“${run.name}” search aur uske results delete karne hain?`)) return;
+      void finderAction(remove, `/api/finder/${run.id}`, null, () => { finderOpen.delete(run.id); finderFilter.delete(run.id); });
+    });
+    actions.append(remove);
+  }
+  card.append(actions);
+
+  const details = element("details", undefined, "batch-details");
+  details.open = finderOpen.get(run.id) || false;
+  details.append(element("summary", `Creators dekho (${counts.matched} fit)`));
+  const body = element("div", undefined, "dm-detail");
+  details.append(body);
+  details.addEventListener("toggle", () => { finderOpen.set(run.id, details.open); if (details.open) void loadFinderResults(body, run); });
+  if (details.open) void loadFinderResults(body, run);
+  card.append(details);
+  return card;
+}
+async function loadFinderResults(body, run) {
+  const filter = finderFilter.get(run.id) || "match";
+  const key = `${run.id}:${filter}`;
+  renderFinderResults(body, run, filter, finderResults.get(key));
+  try {
+    const data = await api(`/api/finder/${encodeURIComponent(run.id)}?filter=${filter}&limit=300`);
+    finderResults.set(key, data.candidates);
+    if (body.isConnected && (finderFilter.get(run.id) || "match") === filter) renderFinderResults(body, run, filter, data.candidates);
+  } catch (error) {
+    if (!finderResults.has(key) && body.isConnected) body.replaceChildren(element("p", messages[error?.code] || "List load nahi hui. Dobara kholo.", "hint"));
+  }
+}
+function finderRow(run, item, filter, body) {
+  const row = element("div", undefined, "dm-target finder-row");
+  const left = element("span");
+  const link = element("a", `@${item.username}`);
+  link.href = `https://www.instagram.com/${encodeURIComponent(item.username)}/`; link.target = "_blank"; link.rel = "noopener noreferrer";
+  left.append(link);
+  if (item.status === "done") {
+    const facts = [`${compact(item.followers)} followers`, lastPost(item.last_post_at)];
+    if (item.avg_views) facts.push(`~${compact(item.avg_views)} views`);
+    if (item.private) facts.push("private");
+    if (item.category) facts.push(item.category);
+    left.append(element("small", facts.join(" · ")));
+  } else if (item.status === "not_found" || item.status === "failed") {
+    left.append(element("small", item.status === "not_found" ? "Account nahi mila" : "Khul nahi paya"));
+  } else {
+    left.append(element("small", item.status === "reading" ? "Abhi dekh raha hai" : `Line mein · level ${item.depth}`));
+  }
+  const found = item.depth === 0 ? "Seed" : item.mentions > 1 ? `${item.mentions} creators ke similar mein` : item.via ? `@${item.via} ke similar mein` : "";
+  const extra = [found, item.contacted ? "pehle DM ja chuka" : ""].filter(Boolean).join(" · ");
+  if (extra) left.append(element("small", extra, "finder-via"));
+  row.append(left);
+  if (item.status === "done") {
+    const review = element("span", undefined, "finder-review");
+    for (const [value, text, className, label] of [["approved", "✓", "yes", "Pasand"], ["rejected", "✕", "no", "Hatao"]]) {
+      const button = element("button", text, className); button.type = "button";
+      button.setAttribute("aria-pressed", String(item.review === value));
+      button.setAttribute("aria-label", `${label}: @${item.username}`);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const next = item.review === value ? null : value;
+        try {
+          await api(`/api/finder/${run.id}/review`, { method: "POST", body: JSON.stringify({ username: item.username, review: next }) });
+          item.review = next;
+          for (const key of [...finderResults.keys()]) if (key.startsWith(`${run.id}:`) && key !== `${run.id}:${filter}`) finderResults.delete(key);
+          await loadFinder();
+        } catch (error) { explain(error); button.disabled = false; }
+      });
+      review.append(button);
+    }
+    row.append(review);
+  }
+  return row;
+}
+function renderFinderResults(body, run, filter, items) {
+  body.replaceChildren();
+  const chips = element("div", undefined, "reply-filter");
+  chips.setAttribute("role", "group"); chips.setAttribute("aria-label", "Kaunse creators dikhayein");
+  for (const [key, label] of FINDER_FILTERS) {
+    const chip = element("button", label, "reply-chip"); chip.type = "button";
+    chip.setAttribute("aria-pressed", String(key === filter));
+    chip.addEventListener("click", () => { finderFilter.set(run.id, key); void loadFinderResults(body, run); });
+    chips.append(chip);
+  }
+  body.append(chips);
+  if (!items) body.append(element("p", "List load ho rahi hai…", "hint"));
+  else if (!items.length) {
+    body.append(element("p", { match: "Abhi koi creator filter mein fit nahi hua.", approved: "Abhi kisi ko ✓ nahi kiya. Fit list mein ✓ dabao.",
+      other: "Koi nahi.", queue: "Line khaali hai." }[filter] || "Koi nahi.", "hint"));
+  } else {
+    const list = element("div", undefined, "dm-targets");
+    for (const item of items) list.append(finderRow(run, item, filter, body));
+    body.append(list);
+    if (items.length >= 300) body.append(element("p", "Pehle 300 dikh rahe hain. Poori list copy button se milegi.", "hint"));
+  }
+
+  const copy = element("div", undefined, "frame-buttons");
+  for (const [which, label] of [["approved", "Pasand wale copy karo"], ["match", "Saare fit copy karo"]]) {
+    const button = element("button", label, which === "approved" ? "quiet strong" : "quiet"); button.type = "button";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const names = (await api(`/api/finder/${run.id}/usernames?filter=${which}`)).usernames;
+        if (!names.length) { notice(which === "approved" ? "Abhi kisi creator ko ✓ nahi kiya." : "Abhi koi fit creator nahi hai."); return; }
+        await navigator.clipboard.writeText(names.join("\n"));
+        notice(`${names.length} usernames copy ho gaye.`);
+      } catch (error) { if (error?.code) explain(error); else notice("Copy nahi ho paya. Browser ko clipboard ki permission do.", true); }
+      finally { button.disabled = false; }
+    });
+    copy.append(button);
+  }
+  body.append(copy);
+
+  const add = document.createElement("textarea");
+  add.id = `finder-add-${run.id}`; add.rows = 3; add.spellcheck = false;
+  add.placeholder = "Aur seeds: usernames ya profile links, ek line mein ek";
+  const addLabel = element("label", "Aur seeds jodo"); addLabel.htmlFor = add.id;
+  const addButton = element("button", "Seeds jodo", "quiet strong"); addButton.type = "button";
+  const addButtons = element("div", undefined, "frame-buttons"); addButtons.append(addButton);
+  addButton.addEventListener("click", async () => {
+    if (!add.value.trim()) return;
+    addButton.disabled = true;
+    try {
+      const data = await api(`/api/finder/${run.id}/seeds`, { method: "POST", body: JSON.stringify({ seeds: add.value }) });
+      notice(`${data.added} naye seeds jud gaye${data.invalid.length ? `, ${data.invalid.length} galat chhode` : ""}. Start dabao.`);
+      add.value = "";
+      await loadFinder();
+    } catch (error) { explain(error); addButton.disabled = false; }
+  });
+  body.append(addLabel, add, addButtons);
+}
+async function loadFinderProfiles() {
+  const select = $("finder-profile");
+  const keep = select.value;
+  let profiles = [];
+  let failed = false;
+  try { profiles = (await api("/api/dm/profiles")).profiles; } catch { failed = true; }
+  // The DM account cannot be the finder's.
+  const dmProfiles = new Set((dmState?.campaigns || []).map((campaign) => campaign.profile_id));
+  select.replaceChildren(element("option", profiles.length ? "Finder wala profile chuno" : failed ? "Profiles load nahi hui · ID khud daalo" : "Koi profile nahi mili · ID khud daalo"));
+  select.firstChild.value = "";
+  for (const profile of profiles) {
+    const used = dmProfiles.has(profile.id);
+    const option = element("option", `${profile.name || "Profile"} · ${profile.id.slice(0, 8)}${used ? " · DM account" : ""}`);
+    option.value = profile.id; option.dataset.name = profile.name || ""; option.disabled = used;
+    select.append(option);
+  }
+  const manual = element("option", "Profile ID khud daalo…"); manual.value = "manual";
+  select.append(manual);
+  select.value = [...select.options].some((option) => option.value === keep && keep && !option.disabled) ? keep : "";
+  finderProfilesLoaded = !failed;
+  updateFinderProfile();
+}
+function updateFinderProfile() {
+  const manual = $("finder-profile").value === "manual";
+  $("finder-profile-manual").hidden = !manual;
+  $("finder-profile-id").required = manual;
+}
+function updateFinderEstimate() {
+  const seeds = countEntries($("finder-seeds").value);
+  $("finder-seeds-count").textContent = seeds
+    ? `${seeds} seeds${seeds > 50 ? " · 50 tak hi chalenge" : ""}. Duplicate apne aap hat jayenge.`
+    : "5–10 aise creators jo bilkul tumhare chahiye wale pages jaise hain (50 tak).";
+  const limit = Math.min(300, Math.max(10, Number($("finder-limit").value) || 10));
+  const gap = Number($("finder-gap").value), start = Number($("finder-start").value), end = Number($("finder-end").value);
+  if (start === end % 24) { $("finder-estimate").textContent = "Shuru aur band ka time alag rakho."; return; }
+  const hours = (((end - start) % 24) + 24) % 24 || 24;
+  const perDay = Math.max(1, Math.min(limit, Math.floor((hours * 3600) / gap)));
+  const warm = $("finder-warmup").checked && perDay > 50 ? " Warm-up mein pehle hafte roz 50." : "";
+  $("finder-estimate").textContent = `≈ ${perDay} profiles roz (${hourLabel(start)}–${hourLabel(end)} India time, har ~${gap} second mein ek).${warm}`;
+}
+fillSelect($("finder-start"), dmHourSelect(0, 23, 9));
+fillSelect($("finder-end"), dmHourSelect(1, 24, 23));
+updateFinderEstimate();
+for (const id of ["finder-seeds", "finder-limit", "finder-gap", "finder-start", "finder-end", "finder-warmup"]) $(id).addEventListener("input", updateFinderEstimate);
+$("finder-profile").addEventListener("change", updateFinderProfile);
+$("finder-reload").addEventListener("click", () => { finderProfilesLoaded = false; finderResults.clear(); loadFinder().catch(explain); void loadFinderProfiles(); });
+$("finder-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const select = $("finder-profile");
+  const manual = select.value === "manual";
+  const profileId = (manual ? $("finder-profile-id").value : select.value).trim();
+  if (!DM_UUID.test(profileId)) { notice("Finder wala Browser Use profile chuno, ya uski poori ID (36 akshar) daalo.", true); return; }
+  const button = $("finder-save"); button.disabled = true;
+  try {
+    const data = await api("/api/finder", { method: "POST", body: JSON.stringify({
+      name: $("finder-name").value.trim(), profile_id: profileId, profile_name: manual ? null : select.selectedOptions[0]?.dataset.name || null,
+      seeds: $("finder-seeds").value, min_followers: Number($("finder-min").value), max_followers: $("finder-max").value ? Number($("finder-max").value) : null,
+      active_days: Number($("finder-days").value), depth: Number($("finder-depth").value), daily_limit: Number($("finder-limit").value),
+      gap_seconds: Number($("finder-gap").value), start_hour: Number($("finder-start").value), end_hour: Number($("finder-end").value),
+      proxy: $("finder-proxy").value, warmup: $("finder-warmup").checked
+    }) });
+    notice(`Search save ho gayi: ${data.seeds} seeds${data.invalid.length ? ` · ${data.invalid.length} galat entries chhodi: ${data.invalid.slice(0, 5).join(", ")}` : ""}. Ab card pe “Pehle 50 (test)” chunkar Start dabao.`);
+    $("finder-name").value = ""; $("finder-seeds").value = ""; $("finder-new").open = false;
+    updateFinderEstimate();
+    await loadFinder();
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });
