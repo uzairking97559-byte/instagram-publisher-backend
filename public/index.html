@@ -78,6 +78,7 @@
             <button id="tab-dm-create" type="button" role="tab" aria-controls="dm-create" aria-selected="false" tabindex="-1">Naya campaign</button>
           </div>
           <div id="subnav-creators" class="subnav" role="tablist" aria-label="Creators" hidden>
+            <button id="tab-finder" type="button" role="tab" aria-controls="finder" aria-selected="false" tabindex="-1">Finder</button>
             <button id="tab-creators" type="button" role="tab" aria-controls="creators" aria-selected="false" tabindex="-1">List check</button>
           </div>
           <div id="posting-bar" class="switcher">
@@ -252,6 +253,51 @@
         </section>
 
         <!-- Creators -->
+        <section id="finder" class="view" role="tabpanel" aria-labelledby="tab-finder" hidden>
+          <div class="view-head">
+            <div><h2>Creator finder</h2><p class="muted">Kuch creators ke naam do. Website Instagram ke “Similar accounts” se naye creators dhundhegi aur har ek ke followers, aakhri post aur views dekhegi. Kisi ko message nahi jata.</p></div>
+            <button id="finder-reload" class="quiet small" type="button">Refresh</button>
+          </div>
+          <p id="finder-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak search bana sakte ho, chalegi nahi.</p>
+          <div id="finder-list" class="jobs"></div>
+          <details id="finder-new" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Nayi search banao</summary>
+            <form id="finder-form" class="dm-form">
+              <label for="finder-name">Search ka naam</label>
+              <input id="finder-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Meme pages">
+              <label for="finder-profile">Kis Instagram account se dekhna hai (Browser Use profile)</label>
+              <select id="finder-profile" required><option value="">Profiles load ho rahi hain…</option></select>
+              <div id="finder-profile-manual" hidden>
+                <label for="finder-profile-id">Profile ID</label>
+                <input id="finder-profile-id" type="text" maxlength="36" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              </div>
+              <p class="hint">Finder ka apna alag Instagram account hona chahiye, jo sirf isi Browser Use profile mein login ho. DM wala account yahan nahi chalega.</p>
+              <label for="finder-seeds">Shuruaati creators (seeds), ek line mein ek</label>
+              <textarea id="finder-seeds" rows="5" required spellcheck="false" autocomplete="off" placeholder="daily_jokes7738&#10;@shinchan_edits.01&#10;https://www.instagram.com/some_meme_page/"></textarea>
+              <p id="finder-seeds-count" class="hint">5–10 aise creators jo bilkul tumhare chahiye wale pages jaise hain (50 tak).</p>
+              <div class="dm-fields">
+                <div><label for="finder-min">Kam se kam followers</label><input id="finder-min" type="number" min="0" step="1" value="10000" required></div>
+                <div><label for="finder-max">Zyada se zyada followers</label><input id="finder-max" type="number" min="1" step="1" placeholder="Koi limit nahi"></div>
+                <div><label for="finder-days">Aakhri post kitne din mein</label><input id="finder-days" type="number" min="1" max="365" step="1" value="30" required></div>
+                <div><label for="finder-depth">Kitna aage tak dhundhe</label><select id="finder-depth"><option value="1">Sirf seeds ke similar</option><option value="2" selected>Unke similar bhi</option><option value="3">Teen level tak</option></select></div>
+                <div><label for="finder-limit">Roz ke maximum profiles</label><input id="finder-limit" type="number" min="10" max="300" step="1" value="100" required></div>
+                <div><label for="finder-gap">Har profile ke beech gap</label><select id="finder-gap"><option value="30">30 second</option><option value="45">45 second</option><option value="60" selected>1 minute</option><option value="90">1.5 minute</option><option value="120">2 minute</option><option value="180">3 minute</option><option value="300">5 minute</option></select></div>
+                <div><label for="finder-start">Kab se (India time)</label><select id="finder-start"></select></div>
+                <div><label for="finder-end">Kab tak</label><select id="finder-end"></select></div>
+              </div>
+              <p id="finder-estimate" class="hint"></p>
+              <label for="finder-proxy">Internet connection</label>
+              <select id="finder-proxy">
+                <option value="in">India proxy (data paid)</option>
+                <option value="none">Bina proxy (sasta)</option>
+              </select>
+              <label class="check"><input id="finder-warmup" type="checkbox" checked><span><strong>Apne aap warm-up.</strong> Account ke pehle hafte roz 50 profiles tak, phir har hafte +50 (upar wali limit tak). Instagram warning ke baad 25 se dobara.</span></label>
+              <button id="finder-save" class="primary" type="submit">Search save karo</button>
+            </form>
+          </details>
+          <div class="side-note"><strong>Account ki safety.</strong><p>Finder bhi automation hai, isliye uska account bhi suspend ho sakta hai. Alag account rakho, pehle 50 profiles ka test chalao. Instagram koi limit, logout ya security check de to search apne aap ruk jayegi.</p></div>
+        </section>
+
         <section id="creators" class="view" role="tabpanel" aria-labelledby="tab-creators" hidden>
           <div class="view-head">
             <div><h2>Creator list check</h2><p class="muted">Kaun se accounts abhi bhi hain, aur kisne haal mein post kiya. Instagram ki official API se, background mein ~<span id="check-rate">180</span> naam per ghanta.</p></div>

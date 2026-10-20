@@ -593,6 +593,19 @@ input[type=file] + textarea { margin-top: 8px; }
 .dm-target small { display: block; margin-top: 2px; font-size: 13px; color: var(--dim); }
 .dm-detail textarea { min-height: 80px; font-size: 15px; }
 
+/* Creator finder: each creator's numbers, and ✓ / ✕ to keep or drop them */
+.finder-row small.finder-via { color: var(--haze); }
+.finder-review { display: inline-flex; flex: 0 0 auto; gap: 6px; }
+.finder-review button {
+  min-width: 40px; min-height: 36px; padding: 4px 10px;
+  border-radius: 999px; border: 1px solid var(--seam-strong);
+  background: transparent; color: var(--haze);
+  font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.finder-review button.yes[aria-pressed="true"] { border-color: var(--leaf); background: var(--leaf-soft); color: var(--leaf); }
+.finder-review button.no[aria-pressed="true"] { border-color: var(--brick); background: var(--brick-soft); color: var(--brick); }
+.dm-detail .frame-buttons { margin-top: 12px; }
+
 /* Replies: account tabs, then each person's message and the answers */
 .reply-tabs { display: flex; gap: 8px; margin: 0 0 10px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
 .reply-tab, .reply-chip {
