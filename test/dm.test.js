@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { harness, json } = require("./helpers");
-const { parseUsernames, inWindow, nextHourAt } = require("../lib/dm");
+const { parseUsernames, inWindow, nextHourAt, gapFactor } = require("../lib/dm");
 
 const KEY = "test-browser-use-key";
 const PROFILE = "35a603c8-5ea3-415e-a626-eb4d530cdcb4";
@@ -114,6 +114,10 @@ test("usernames come from lines, @names and Instagram links; hours follow India 
   assert.equal(inWindow(new Date("2026-10-18T18:00:00Z"), 8, 23), false, "23:30 in India is outside 8–23");
   assert.equal(inWindow(new Date("2026-10-18T18:00:00Z"), 22, 2), true, "overnight hours");
   assert.equal(nextHourAt(new Date("2026-10-18T18:00:00Z"), 8).toISOString(), "2026-10-19T02:30:00.000Z");
+  // Gaps differ from 0.4× to 1.6× and average the set gap.
+  assert.deepEqual([0, 0.25, 0.5, 0.75, 0.999999].map((r) => Math.round(gapFactor(r) * 100) / 100), [0.4, 0.7, 1, 1.3, 1.6]);
+  const samples = Array.from({ length: 1000 }, (_, index) => gapFactor((index + 0.5) / 1000));
+  assert.equal(Math.round((samples.reduce((sum, value) => sum + value, 0) / samples.length) * 100) / 100, 1);
 });
 
 test("DM Sender needs sign-in and a Browser Use key", async (t) => {
