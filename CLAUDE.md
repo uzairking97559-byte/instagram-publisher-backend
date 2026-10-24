@@ -111,9 +111,11 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
   profile without the owner.
 - Do not create Instagram accounts, solve captchas, bypass Instagram security checks, fake
   human activity, or help an account avoid being linked to suspended ones.
-- Current state: the DM account is suspended by Instagram (appeal pending). Do not start DM
-  campaigns or inbox checks until the owner says it is back. The finder has not run yet;
-  it waits for a separate Browser Use profile, and its first run is a 50-profile test.
+- Current state (24 Oct 2026): the first DM account had an Instagram "Confirm you're human"
+  check (cleared by the owner) and its Browser Use login expired. DMs now go from a second,
+  older account in its own profile ("DM 2"), starting with a 5-DM test, ~20/day, 12-minute
+  gap, India proxy. Add more accounts one at a time, each after its own clean test. The
+  finder has not run yet; its first run is a 50-profile test.
 
 ## Environment variables (names only — values are set in Render)
 
