@@ -2,7 +2,7 @@
 
 An existing Node.js / Express Instagram Publisher backend, with a private mobile dashboard and official Meta authorization. This is a **single-owner workspace**, not a public multi-tenant SaaS. Every person who knows the dashboard password can manage every connected account. Do not share that password with clients.
 
-The website has three parts: **Posting** (accounts, new post, Activity), **Messages** (Replies, DM campaigns, new campaign) and **Creators** (Finder, List check). Every change goes through a pull request with CI and is deployed to Render from `main`. `CLAUDE.md` has the short version for coding agents.
+The website has three parts: **Posting** (accounts, new post, Activity), **Messages** (Replies, DM campaigns, new campaign) and **Creators** (Joined, Finder, List check). Every change goes through a pull request with CI and is deployed to Render from `main`. `CLAUDE.md` has the short version for coding agents.
 
 ## Run and test
 
@@ -91,7 +91,11 @@ Sending messages through the website instead of the official API is outside Meta
 
 **Messages → Replies** lists, per Instagram account, the chats where the other person wrote last, with their message. While a campaign's browser is open its inbox is read every 30 minutes, and once more before the browser closes; **Abhi check karo** opens a browser just for that (it closes 3 minutes after its last job). Each account that sent DMs in the last 3 days is also read once at 16:00, 19:00 and 22:00 India time (within the hour; `DM_CHECK_HOURS`, e.g. `16,19,22` or `none`), unless Instagram logged it out or stopped it. A logout, security check or warning seen while reading is reported as such and pauses the account's campaigns; when Instagram sends the browser away from the inbox (for example to its home page with "Continue as …"), that counts as a logout, not an empty inbox. An answer typed under a reply is sent from the same account by the worker (tried up to 3 times, never twice if it is already in the chat). Saved answers (up to 8, `{username}` allowed) appear as one-tap buttons.
 
-With `TELEGRAM_BOT_TOKEN` (and optionally `TELEGRAM_BOT_USERNAME`) set, the Replies page shows **Telegram jodo**: a one-time link (15 minutes) connects the owner's private chat. The bot then posts each new reply with buttons for saved answers; replying to that message sends the answer. Commands: `/menu`, `/replies`, `/check`, `/aaj`, `/kal`, `/campaigns`, `/jawab`. It also alerts when a campaign or finder search pauses or finishes, sends a short summary at 22:00 India time, and at 09:00 a report of the day before (DMs, replies, answers, cost and cost per reply, each account, the best message version, Instagram warnings, stopped campaigns and the finder), skipped when nothing happened; `/kal` shows it any time. Telegram calls the website at `/telegram/webhook`, checked with a secret header derived from the token.
+With `TELEGRAM_BOT_TOKEN` (and optionally `TELEGRAM_BOT_USERNAME`) set, the Replies page shows **Telegram jodo**: a one-time link (15 minutes) connects the owner's private chat. The bot then posts each new reply with buttons for saved answers; replying to that message sends the answer. Commands: `/menu`, `/replies`, `/check`, `/aaj`, `/kal`, `/campaigns`, `/jawab`. It also alerts when a campaign or finder search pauses or finishes, when a creator sends a WhatsApp number or Telegram ID (with WhatsApp/Telegram buttons), sends a short summary at 22:00 India time, and at 09:00 a report of the day before (DMs, replies, answers, cost and cost per reply, each account, the best message version, Instagram warnings, stopped campaigns, the finder and the Joined list), skipped when nothing happened; `/kal` shows it any time. Telegram calls the website at `/telegram/webhook`, checked with a secret header derived from the token.
+
+## Joined creators
+
+**Creators → Joined** keeps the creators who answered a DM with a way to reach them. Every new or changed reply is scanned (`lib/leads.js`): an Indian mobile number (10 digits from 6–9, with or without +91/0, spaces or dashes, or a `wa.me` link) and a Telegram ID (a `t.me` link, "Telegram … @name", "Telegram id: name", or a line that is only `@name`) make or complete that creator's entry, and the Telegram bot announces it. Replies without one get a **Joined mein daalo** button, and anyone can be added by hand. Each entry links to the Instagram profile, WhatsApp (`wa.me`) and Telegram, and moves through Naya → Baat hui → Logo bheja → Kaam shuru (or Mana), with a note. Counts per status, today's new ones, a status filter and **Report copy karo** (a short summary for the brand) sit on top.
 
 ## Creator finder
 
@@ -146,6 +150,7 @@ All account/job routes require the owner session cookie. All writes require an e
 | `GET /api/dm/replies`, `POST /api/dm/replies/check`, `POST /api/dm/replies/:id/answer`, `POST /api/dm/replies/:id/done` | Replies per account, ask for an inbox check, queue an answer, mark a reply done |
 | `GET`/`POST /api/dm/templates`, `DELETE /api/dm/templates/:id` | Saved answers |
 | `GET /api/telegram`, `POST /api/telegram/link`, `DELETE /api/telegram`; `POST /telegram/webhook` | Telegram bot status, one-time link, unlink; Telegram's webhook (secret header, no session) |
+| `GET /api/leads[?status=]`, `POST /api/leads`, `PUT`/`DELETE /api/leads/:id` | Joined creators with counts; add (`username`, or `reply_id` from a reply, optional `phone`/`telegram`); change `status` (new/talking/logo_sent/working/declined), `phone`, `telegram`, `note`; remove |
 | `GET`/`POST /api/finder`, `GET`/`PUT`/`DELETE /api/finder/:id[?filter=]`, `POST .../seeds\|start\|pause\|review`, `GET .../usernames` | Creator finder: searches, results (match/approved/rejected/other/queue/missing/all), seeds, start (optional `stop_after`), pause, ✓/✕, usernames to copy |
 
 Example photo body (also send the idempotency header):
