@@ -196,6 +196,8 @@ function site(requests, inbox = "ok") {
     "/nochat/": profile("nochat", { setup: "window.NEVER = true;" }),
     "/vanish/": profile("vanish", { setup: "window.VANISH = true;" }),
     "/accounts/login/": page('<form><input name="username"><input name="password" type="password"></form>'),
+    // Instagram's home page for a saved account whose login ended: no password box.
+    "/": page('<main><p>aiglow.test</p><button>Continue as aiglow.test</button><a href="/accounts/login/">Switch accounts</a></main>'),
     "/direct/inbox/": page(`<script>window.INBOX = ${JSON.stringify({ alice3: { name: "Alice Three", old: [] }, bob3: { name: "Bob Three", old: [MESSAGE] },
       closed3: { name: "Closed Three", old: [], closed: true } })}; window.NOTICE = ${JSON.stringify(NOTICE)};` +
       `window.INBOX_MODE = ${JSON.stringify(inbox)};</script>` +
@@ -204,6 +206,7 @@ function site(requests, inbox = "ok") {
   return http.createServer((req, res) => {
     requests.push(req.url);
     if (req.url === "/login/") { res.writeHead(302, { location: "/accounts/login/" }); return res.end(); }
+    if (inbox === "gone" && req.url.startsWith("/direct/")) { res.writeHead(302, { location: "/" }); return res.end(); }
     if (req.url === "/picture.png") { res.writeHead(200, { "content-type": "image/png" }); return res.end(Buffer.alloc(64)); }
     const html = inbox === "threads" && req.url.startsWith("/direct/") ? THREADS_PAGE : pages[req.url];
     res.writeHead(html ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
@@ -376,4 +379,17 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   // After our answer Carol's chat shows our message last and is not listed again.
   const again = await session.readReplies({ outgoing: async (username) => sentTo[username] || [], known: async () => false });
   assert.deepEqual(again.replies.map((reply) => reply.username), ["erin", "hana"]);
+});
+
+test("inbox: sent away to the home page means no login, not an empty inbox", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { requests, baseUrl } = await serve(t, "gone");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+
+  assert.deepEqual(await session.readReplies({ outgoing: async () => [], known: async () => false }),
+    { status: "blocked", reason: "logged_out", text: null, attempted: false });
+  // A campaign stops too, instead of trying the profile route on a logged-out page.
+  assert.deepEqual(await session.sendDm({ username: "alice", message: MESSAGE }),
+    { status: "blocked", reason: "logged_out", text: null, attempted: false });
+  assert.equal(requests.includes("/alice/"), false);
 });
