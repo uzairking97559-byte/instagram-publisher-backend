@@ -1492,11 +1492,39 @@ function renderDmDetail(body, campaign, targets) {
   body.append(addLabel, add, addButtons);
   if (campaign.status !== "running") body.append(dmSettingsEditor(campaign));
 }
+// Browser Use profiles, fetched once for the campaign editors.
+let dmProfileList = null;
+function dmProfilesOnce() {
+  dmProfileList ||= api("/api/dm/profiles").then((data) => data.profiles).catch((error) => { dmProfileList = null; throw error; });
+  return dmProfileList;
+}
+// The campaign's account, plus every other Browser Use profile (a finder's is shown but can't be picked).
+function dmAccountSelect(campaign) {
+  const select = document.createElement("select");
+  const current = element("option", `${campaign.profile_name || "Profile"} · ${campaign.profile_id.slice(0, 8)}`);
+  current.value = campaign.profile_id; current.dataset.name = campaign.profile_name || "";
+  select.append(current);
+  void dmProfilesOnce().then((profiles) => {
+    const finders = new Set((finderState?.runs || []).map((run) => run.profile_id));
+    for (const profile of profiles) {
+      if (profile.id === campaign.profile_id) continue;
+      const finder = finders.has(profile.id) || /finder/i.test(profile.name || "");
+      const option = element("option", `${profile.name || "Profile"} · ${profile.id.slice(0, 8)}${finder ? " · Finder" : ""}`);
+      option.value = profile.id; option.dataset.name = profile.name || ""; option.disabled = finder;
+      select.append(option);
+    }
+  }).catch(() => {});
+  return select;
+}
 const WARMUP_TEXT = "Apne aap warm-up: account ke pehle hafte roz 20 tak, phir har hafte +10 (upar wali limit tak). Instagram warning ke baad 10 se dobara.";
 function dmSettingsEditor(campaign) {
   const details = element("details", undefined, "frame-settings");
-  details.append(element("summary", "Message ya speed badlo"));
+  details.append(element("summary", "Account, message ya speed badlo"));
   const form = element("div", undefined, "frame-form");
+  const account = dmAccountSelect(campaign);
+  account.id = `dm-edit-account-${campaign.id}`;
+  const accountLabel = element("label", "Kis Instagram account se (Browser Use profile)"); accountLabel.htmlFor = account.id;
+  const accountNote = element("p", "Account badalne par wahi list naye account se jayegi. Jinhe pehle DM ja chuka hai, unhe dobara nahi jayega. Naye account par warm-up shuru se lagega.", "hint");
   const message = document.createElement("textarea");
   message.id = `dm-edit-message-${campaign.id}`; message.rows = 5; message.maxLength = 5000; message.value = campaign.message;
   const messageLabel = element("label", "Message"); messageLabel.htmlFor = message.id;
@@ -1522,13 +1550,14 @@ function dmSettingsEditor(campaign) {
     save.disabled = true;
     try {
       await api(`/api/dm/campaigns/${campaign.id}`, { method: "PUT", body: JSON.stringify({
+        profile_id: account.value, profile_name: account.selectedOptions[0]?.dataset.name || null,
         message: message.value, daily_limit: Number(limit.value), gap_minutes: Number(gap.value),
         start_hour: Number(start.value), end_hour: Number(end.value), proxy: proxy.value, warmup: warmup.checked }) });
       notice(`“${campaign.name}” ki settings save ho gayi.`);
       await loadDm();
     } catch (error) { explain(error); save.disabled = false; }
   });
-  form.append(messageLabel, message, fields, proxyLabelNode, proxyNote, warmupLabel, buttons);
+  form.append(accountLabel, account, accountNote, messageLabel, message, fields, proxyLabelNode, proxyNote, warmupLabel, buttons);
   details.append(form);
   return details;
 }
@@ -1827,7 +1856,7 @@ const showDmProxyNote = () => { $("dm-proxy-note").textContent = DM_PROXY_NOTES[
 $("dm-proxy").addEventListener("change", showDmProxyNote);
 showDmProxyNote();
 $("dm-new-open").addEventListener("click", () => showView("dm-create"));
-$("dm-reload").addEventListener("click", () => { dmProfilesLoaded = false; loadDm().catch(explain); });
+$("dm-reload").addEventListener("click", () => { dmProfilesLoaded = false; dmProfileList = null; loadDm().catch(explain); });
 $("dm-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const select = $("dm-profile");
