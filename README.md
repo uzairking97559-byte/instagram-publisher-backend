@@ -2,9 +2,7 @@
 
 An existing Node.js / Express Instagram Publisher backend, with a private mobile dashboard and official Meta authorization. This is a **single-owner workspace**, not a public multi-tenant SaaS. Every person who knows the dashboard password can manage every connected account. Do not share that password with clients.
 
-## Review status
-
-The phone-based bulk Reel upload changes are prepared on a feature branch for review; they are not yet deployed to the live Render app. The current live app still accepts public media URLs. Do not use the live site for account access or publishing while Chrome or Google Search Console reports a security warning. A passing test suite does not establish Safe Browsing clearance.
+The website has three parts: **Posting** (accounts, new post, Activity), **Messages** (Replies, DM campaigns, new campaign) and **Creators** (Finder, List check). Every change goes through a pull request with CI and is deployed to Render from `main`. `CLAUDE.md` has the short version for coding agents.
 
 ## Run and test
 
@@ -73,10 +71,12 @@ Uploading is unchanged. A background worker in the web process frames queued Ree
 
 ## DM Sender
 
-The **DMs** tab sends one message to Instagram creators who asked for promotion details (for example by commenting on a Reel), from the owner's own Instagram account. It does not use the Meta API: the account stays logged in inside a [Browser Use](https://browser-use.com) cloud browser profile, and the server drives that browser over the Chrome DevTools Protocol with fixed steps (`lib/instagram-dm.js`, no AI model per message). Images, video and fonts are not downloaded, and one browser is reused for many messages, to keep proxy data small.
+**Messages → Campaigns** sends one message to Instagram creators who asked for promotion details (for example by commenting on a Reel), from the owner's own Instagram account. It does not use the Meta API: the account stays logged in inside a [Browser Use](https://browser-use.com) cloud browser profile, and the server drives that browser over the Chrome DevTools Protocol with fixed steps (`lib/instagram-dm.js`, no AI model per message). Images, video and fonts are not downloaded, and one browser is reused for many messages, to keep proxy data small.
 
-- A **campaign** has a name, a Browser Use profile (one Instagram account), the message (up to 1,000 characters), a list of up to 2,000 usernames or profile links, a daily limit (1–200, default 100), a gap between messages (2–60 minutes, default 9, varied ±20%) and the hours to send in, India time (default 08:00–23:00). The owner must confirm that the people on the list asked to be contacted.
-- Nobody gets the message twice: a username already messaged from any campaign is skipped, and before typing, the chat is checked for the same message.
+- A **campaign** has a name, a Browser Use profile (one Instagram account), the message (up to 1,000 characters per version; several versions can be separated by a line with `---`, one is picked per DM, and `{username}` becomes the creator's username), a list of up to 2,000 usernames or profile links, a daily limit (1–200, default 100), a gap between messages (2–60 minutes, default 9, varied ±20%) and the hours to send in, India time (default 08:00–23:00). The owner must confirm that the people on the list asked to be contacted.
+- Nobody gets the message twice: a username already messaged from any campaign is skipped, and before typing, the chat is checked for any version of the message.
+- Messages are sent from the Direct inbox (New message → search → Chat), so Instagram's page loads once per browser (~4.7 MB) and each later DM uses ~50 KB; when the inbox doesn't work the driver opens the profile instead (`DM_SEND_METHOD=profile` always does). When Instagram shows its "can't receive your message" notice, the DM counts as sent for pacing but is marked not delivered.
+- **Warm-up** (on by default): an account sends at most 20 DMs a day in its first week of DMs, +10 each week, up to the campaign's limit; after an Instagram warning or security check it starts again at 10.
 - **Start** can stop after a number of messages (the form suggests a 5-message test first). Any Instagram warning ("Try again later", restricted), logout or security check pauses the campaign and closes the browser; so do three failures in a row, a rejected key or no credits. The owner checks Instagram and starts again. One account runs one campaign at a time.
 - The worker runs every 15 seconds in the web process. A database lease keeps two copies of the service (for example during a deploy) from sending at once; on start-up, browsers left open by an earlier run are stopped (which also saves the profile's login) and a message cut off by the restart is tried again (the chat check prevents a repeat).
 - Each card shows the cost in rupees (Browser Use browser time and proxy data, converted at `DM_USD_INR`, default 96.5) and the cost per message.
@@ -85,9 +85,21 @@ Set `BROWSER_USE_API_KEY` in the service's environment (never in code or chat). 
 
 Sending messages through the website instead of the official API is outside Meta's platform terms, and messages to people who do not follow the account land in their message requests. Keep the pace low and stop when Instagram warns.
 
+### Replies and the Telegram bot
+
+**Messages → Replies** lists, per Instagram account, the chats where the other person wrote last, with their message. While a campaign's browser is open its inbox is read every 30 minutes, and once more before the browser closes; **Abhi check karo** opens a browser just for that (it closes 3 minutes after its last job). An answer typed under a reply is sent from the same account by the worker (tried up to 3 times, never twice if it is already in the chat). Saved answers (up to 8, `{username}` allowed) appear as one-tap buttons.
+
+With `TELEGRAM_BOT_TOKEN` (and optionally `TELEGRAM_BOT_USERNAME`) set, the Replies page shows **Telegram jodo**: a one-time link (15 minutes) connects the owner's private chat. The bot then posts each new reply with buttons for saved answers; replying to that message sends the answer. Commands: `/menu`, `/replies`, `/check`, `/aaj`, `/campaigns`, `/jawab`. It also alerts when a campaign or finder search pauses or finishes, and sends a short summary at 22:00 India time. Telegram calls the website at `/telegram/webhook`, checked with a secret header derived from the token.
+
+## Creator finder
+
+**Creators → Finder** finds new creators without messaging anyone. A search has seed usernames (up to 50), follower range, how recent the last post must be, how deep to follow "Similar accounts" (1–3 levels), a daily limit (10–300), a gap between profiles (30–600 s, ±30%), hours (India time), proxy and warm-up. It reads each profile through Instagram's web JSON inside one open Instagram page (`lib/instagram-finder.js`: followers, following, posts, private, category, bio, newest post, average views, similar accounts), falling back to the profile page and its Similar accounts button. Seeds and profiles that fit are followed one level deeper; the queue reads the most-mentioned accounts first. A profile read by any search in the last 14 days is copied instead of read again.
+
+It uses its own Browser Use profile with a separate Instagram login: a profile used by DM campaigns cannot run searches, and a finder profile cannot start DM campaigns. Warm-up allows 50 profiles a day in the first week, +50 a week (25 after an Instagram warning). Logout, security check or rate limit pause the search. Results can be filtered (fit, approved, not fit, queue), marked ✓/✕, and the approved or fitting usernames copied.
+
 ## Creator list check
 
-In the DMs tab, **Creator list check** takes a pasted list or a .txt/.csv file of usernames or profile links (when links are present, only the links count, so a sheet's name column is ignored) and checks each one through Instagram's Business Discovery API: whether it is still a professional account, its followers and when it last posted. Results are split into active (a post within the chosen number of days, default 30), old, and not found (renamed, deleted or no longer professional). The active ones, biggest first, can be copied or put straight into a new DM campaign.
+**Creators → List check** takes a pasted list or a .txt/.csv file of usernames or profile links (when links are present, only the links count, so a sheet's name column is ignored) and checks each one through Instagram's Business Discovery API: whether it is still a professional account, its followers and when it last posted. Results are split into active (a post within the chosen number of days, default 30), old, and not found (renamed, deleted or no longer professional). The active ones, biggest first, can be copied or put straight into a new DM campaign.
 
 It needs one account connected through **Facebook Login with the extra `instagram_manage_insights` permission** (the "Facebook se permission do" link, `/auth/meta/start?extra=insights`); normal connections do not ask for it. The background worker checks one username every 20 seconds (`CHECK_INTERVAL_SECONDS`), about 180 an hour, waits 30 minutes when Instagram reports its rate limit, and pauses when the connection expires or the permission is missing.
 
@@ -128,6 +140,10 @@ All account/job routes require the owner session cookie. All writes require an e
 | `POST /api/dm/campaigns/:id/targets` | Add usernames to a campaign |
 | `GET`/`POST /api/checks`, `GET /api/checks/:id[?filter=]`, `GET .../usernames`, `POST .../pause\|start`, `DELETE /api/checks/:id` | Creator list check: create, results (active/old/not_found/pending/error), usernames, pause/start, delete |
 | `POST /api/dm/campaigns/:id/start`, `.../pause`, `.../retry-failed` | Start (optional `stop_after`), pause, or put failed usernames back in the list |
+| `GET /api/dm/replies`, `POST /api/dm/replies/check`, `POST /api/dm/replies/:id/answer`, `POST /api/dm/replies/:id/done` | Replies per account, ask for an inbox check, queue an answer, mark a reply done |
+| `GET`/`POST /api/dm/templates`, `DELETE /api/dm/templates/:id` | Saved answers |
+| `GET /api/telegram`, `POST /api/telegram/link`, `DELETE /api/telegram`; `POST /telegram/webhook` | Telegram bot status, one-time link, unlink; Telegram's webhook (secret header, no session) |
+| `GET`/`POST /api/finder`, `GET`/`PUT`/`DELETE /api/finder/:id[?filter=]`, `POST .../seeds\|start\|pause\|review`, `GET .../usernames` | Creator finder: searches, results (match/approved/rejected/other/queue/missing/all), seeds, start (optional `stop_after`), pause, ✓/✕, usernames to copy |
 
 Example photo body (also send the idempotency header):
 
