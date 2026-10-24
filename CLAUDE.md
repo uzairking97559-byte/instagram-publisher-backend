@@ -29,8 +29,9 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    details (they commented on the owner's Reels), from an Instagram login kept in a
    **Browser Use** cloud browser profile, driven over the Chrome DevTools Protocol with
    fixed steps (no AI model per message). **Replies** per account, answers typed on the
-   website, saved answers, and a **Telegram bot** that announces replies and sends the
-   owner's answers.
+   website, saved answers, **Hisaab** (per account and per message version: reach, replies,
+   ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
+   and posts a morning report of the day before.
 3. **Creators** — **Finder**: from seed creators, read each profile (followers, last post,
    average views) and Instagram's "Similar accounts" with a separate Instagram login, and
    keep a list to review and copy (nobody is messaged). **List check**: which usernames

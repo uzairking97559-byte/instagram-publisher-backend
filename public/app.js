@@ -1071,6 +1071,7 @@ $("logout").addEventListener("click", async () => {
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
     finderState = null; finderProfilesLoaded = false; finderOpen.clear(); finderFilter.clear(); finderResults.clear();
+    dmStats = null;
     renderDm(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
@@ -1309,6 +1310,7 @@ async function loadDm() {
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && currentView === "dm-create") void loadDmProfiles();
   void loadChecks().catch(() => {});
+  void loadDmStats().catch(() => {});
   void loadFinder().catch(() => {});
   void loadReplies().catch(() => {});
 }
@@ -1706,7 +1708,7 @@ function renderReplies() {
   $("replies-status").classList.toggle("bad", bad);
   $("replies-check").disabled = current.checking || !replyState.configured;
   $("replies-check").textContent = current.checking ? "Check ho raha hai…" : "Abhi check karo";
-  for (const chip of document.querySelectorAll(".reply-chip")) {
+  for (const chip of document.querySelectorAll("#replies .reply-chip")) {
     chip.setAttribute("aria-pressed", String(chip.dataset.filter === replyFilter));
     if (chip.dataset.filter === "new") chip.textContent = current.new ? `Naye (${current.new})` : "Naye";
   }
@@ -1798,7 +1800,7 @@ $("replies-check").addEventListener("click", async () => {
     notice("Inbox check shuru hua. 1–2 minute mein replies yahan dikhenge.");
   } catch (error) { explain(error); button.disabled = false; }
 });
-for (const chip of document.querySelectorAll(".reply-chip")) {
+for (const chip of document.querySelectorAll("#replies .reply-chip")) {
   chip.addEventListener("click", () => { replyFilter = chip.dataset.filter; renderReplies(); });
 }
 
@@ -1883,6 +1885,88 @@ $("dm-form").addEventListener("submit", async (event) => {
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });
+// ---- Hisaab: DMs, replies and cost per account and per message version ----
+let dmStats = null;
+let dmStatsPeriod = ["1", "7", "30", "all"].includes(readSetting("publisher-dm-stats-period")) ? readSetting("publisher-dm-stats-period") : "7";
+async function loadDmStats() {
+  const period = dmStatsPeriod;
+  const data = await api(`/api/dm/stats?period=${period}`);
+  if (period !== dmStatsPeriod) return;
+  dmStats = data;
+  renderDmStats();
+}
+function statRow(left, leftNote, right, rightNote, className = "") {
+  const row = element("div", undefined, `dm-target ${className}`.trim());
+  const first = element("span");
+  first.append(element("strong", left));
+  for (const note of [].concat(leftNote || [])) first.append(element("small", note));
+  const second = element("span", undefined, "stat-right");
+  second.append(element("strong", right));
+  if (rightNote) second.append(element("small", rightNote));
+  row.append(first, second);
+  return row;
+}
+function rateText(item) { return item.reply_rate === null ? "" : ` (${item.reply_rate}%)`; }
+function renderDmStats() {
+  const panel = $("dm-stats");
+  panel.hidden = !dmState?.campaigns.length;
+  for (const chip of panel.querySelectorAll(".reply-chip")) chip.setAttribute("aria-pressed", String(chip.dataset.period === dmStatsPeriod));
+  const body = $("dm-stats-body");
+  body.replaceChildren();
+  if (!dmStats) { body.append(element("p", "Hisaab load ho raha hai…", "hint")); return; }
+  const totals = dmStats.totals;
+  const stats = element("div", undefined, "stats");
+  for (const [value, label, tone] of [[totals.sent, "DM pahunche", ""], [totals.replied, "Reply kiya", "good"],
+    [totals.reply_rate === null ? "–" : `${totals.reply_rate}%`, "Reply rate", ""], [totals.per_reply_inr === null ? "–" : shortRupees(totals.per_reply_inr), "Ek reply ka kharcha", ""]]) {
+    const stat = element("div", undefined, tone ? `stat ${tone}` : "stat");
+    stat.append(element("strong", String(value)), element("span", label));
+    stats.append(stat);
+  }
+  body.append(stats);
+  const extra = [`Kul kharcha ${rupees(totals.cost_inr)}`, `${totals.replies_received} reply aaye`, `${totals.answers_sent} jawab gaye`];
+  if (totals.not_delivered) extra.unshift(`${totals.not_delivered} DM nahi pahunche`);
+  body.append(element("p", extra.join(" · "), "dm-cost"));
+  if (!totals.sent && !totals.not_delivered) {
+    body.append(element("p", dmStatsPeriod === "1" ? "Aaj abhi tak koi DM nahi gaya." : "Is waqt mein koi DM nahi gaya.", "hint"));
+    return;
+  }
+  const accounts = dmStats.accounts.filter((item) => item.sent || item.not_delivered || item.cost_inr);
+  if (accounts.length) {
+    body.append(element("p", "Account", "dm-label"));
+    const list = element("div", undefined, "dm-targets");
+    for (const item of accounts) {
+      const name = item.account ? `@${item.account}` : item.name || `Profile ${item.profile_id.slice(0, 8)}`;
+      const notes = [`${item.sent} DM · ${item.replied} reply${rateText(item)}${item.not_delivered ? ` · ${item.not_delivered} nahi pahunche` : ""}`];
+      if (item.warned_at) notes.push(`⚠️ Instagram warning: ${formatWhen(item.warned_at)}`);
+      list.append(statRow(name, notes, rupees(item.cost_inr), item.per_reply_inr === null ? "" : `${rupees(item.per_reply_inr)} / reply`));
+    }
+    body.append(list);
+  }
+  const versions = dmStats.versions;
+  if (versions.length) {
+    body.append(element("p", "Message versions", "dm-label"));
+    const tried = versions.filter((item) => item.text && item.sent >= 5);
+    const best = tried.length >= 2 ? [...tried].sort((a, b) => b.reply_rate - a.reply_rate || b.sent - a.sent)[0] : null;
+    const list = element("div", undefined, "dm-targets");
+    for (const item of versions) {
+      const text = item.text ? (item.text.length > 110 ? `${item.text.slice(0, 110)}…` : item.text) : "Pehle ke DM (tab version yaad nahi rakha jata tha)";
+      const notes = [`${item.campaign_name}${item.text && !item.current ? " · ab message mein nahi" : ""}`];
+      const row = statRow(text, notes, `${item.replied}/${item.sent}`, item.reply_rate === null ? "" : `${item.reply_rate}% reply`, item === best ? "best" : "");
+      if (item === best) row.firstChild.prepend(element("span", "🏆 Sabse achha", "badge completed"));
+      list.append(row);
+    }
+    body.append(list);
+    if (!best) body.append(element("p", "Kaunsa version achha hai, ye tab dikhega jab kam se kam 2 versions 5-5 logon ko ja chuke honge.", "hint"));
+  }
+}
+for (const chip of document.querySelectorAll("#dm-stats .reply-chip")) {
+  chip.addEventListener("click", () => {
+    dmStatsPeriod = chip.dataset.period;
+    writeSetting("publisher-dm-stats-period", dmStatsPeriod);
+    dmStats = null; renderDmStats();
+    void loadDmStats().catch(explain);
+  });
+}
 // ---- Creator list check: which usernames still exist and post recently ----
 Object.assign(messages, {
   invalid_check: "List ka naam (60 akshar tak) aur 1–365 din daalo.",
