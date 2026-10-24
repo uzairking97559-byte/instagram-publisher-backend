@@ -321,6 +321,16 @@ test("one account runs one campaign at a time; a running campaign cannot be dele
   const updated = await h.request(`/api/dm/campaigns/${first}`, { method: "PUT", cookie, body: { daily_limit: 50, gap_minutes: 12 } });
   assert.equal(updated.data.campaign.daily_limit, 50);
   assert.equal(updated.data.campaign.gap_minutes, 12);
+  // A campaign that is not running can move to another account (Browser Use profile), list and all.
+  const other = "50451a5b-0b11-485b-b6fc-f7e6749d4f80";
+  const moved = await h.request(`/api/dm/campaigns/${second}`, { method: "PUT", cookie, body: { profile_id: other, profile_name: "DM 2" } });
+  assert.deepEqual([moved.data.campaign.profile_id, moved.data.campaign.profile_name, moved.data.campaign.counts.total], [other, "DM 2", 2]);
+  // Now on its own account, it can run while the first one does.
+  assert.equal((await start(first)).status, 200);
+  assert.equal((await start(second)).status, 200);
+  await h.request(`/api/dm/campaigns/${first}/pause`, { method: "POST", cookie, body: {} });
+  await h.request(`/api/dm/campaigns/${second}/pause`, { method: "POST", cookie, body: {} });
+  await h.app.locals.runDmWorker();
   assert.deepEqual(await h.request(`/api/dm/campaigns/${first}`, { method: "DELETE", cookie }).then((res) => res.data), { ok: true });
   assert.equal((await h.request(`/api/dm/campaigns/${first}`, { cookie })).status, 404);
 });
