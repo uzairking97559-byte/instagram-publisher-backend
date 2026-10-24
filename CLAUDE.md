@@ -123,5 +123,6 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
 `META_APP_ID`, `META_APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`,
 `META_GRAPH_VERSION`, `MEDIA_STORAGE_LIMIT_MB`, `FFMPEG_PATH`, `SKIP_FFMPEG_DOWNLOAD`,
 `BROWSER_USE_API_KEY`, `DM_PROXY_COUNTRY`, `DM_USD_INR`, `DM_SEND_METHOD` (`profile` to send
-from profile pages instead of the inbox), `CHECK_INTERVAL_SECONDS`, `TELEGRAM_BOT_TOKEN`,
+from profile pages instead of the inbox), `DM_CHECK_HOURS` (fixed inbox checks, default
+`16,19,22`), `CHECK_INTERVAL_SECONDS`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_BOT_USERNAME`, `NODE_ENV`, `PORT`, `RENDER`.

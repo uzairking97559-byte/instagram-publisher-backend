@@ -1843,7 +1843,7 @@ function updateDmCounts() {
   const gap = Number($("dm-gap").value), start = Number($("dm-start").value), end = Number($("dm-end").value);
   if (start === end % 24) { $("dm-estimate").textContent = "Shuru aur band ka time alag rakho."; return; }
   const perDay = dmPerDay(limit, gap, start, end);
-  $("dm-estimate").textContent = `≈ ${perDay} DM roz (${hourLabel(start)}–${hourLabel(end)} India time, har ~${gap} minute mein ek).`
+  $("dm-estimate").textContent = `≈ ${perDay} DM roz (${hourLabel(start)}–${hourLabel(end)} India time, average har ${gap} minute mein ek; har gap alag hoga, ~${Math.round(gap * 0.4)} se ~${Math.round(gap * 1.6)} minute).`
     + (entries ? ` ${entries} creators ≈ ${Math.ceil(entries / perDay)} din.` : "");
 }
 fillSelect($("dm-gap"), dmGapSelect(9));

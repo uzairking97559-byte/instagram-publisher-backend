@@ -107,7 +107,8 @@ if (window.INBOX) {
 // the person's profile; their messages on the left, ours on the right.
 function rowPreview(thread) {
   const last = thread.msgs[thread.msgs.length - 1];
-  return (thread.seen ? 'Seen' : last.me ? 'You: ' + last.text : last.text) + ' · 5m';
+  const text = thread.seen ? 'Seen' : last.me && !thread.plain ? 'You: ' + last.text : last.text;
+  return (thread.label ? '• ' + thread.label + ' ' : '') + text + ' · 5m';
 }
 function renderList() {
   const list = document.querySelector('.list');
@@ -164,7 +165,11 @@ const THREADS = [
   { id: "3", user: "erin", name: "Erin E", link: false, msgs: [{ text: "Hello? Anyone there" }] },
   { id: "4", user: "frank", name: "Frank F", msgs: [{ me: true, text: OURS("frank") }, { text: "ok" }] },
   { id: "5", user: "gina", name: "Gina G", seen: true, msgs: [{ me: true, text: OURS("gina") }] },
-  { id: "6", user: "hana", name: "Hana H", msgs: [{ me: true, text: OURS("hana") }, { notice: true, text: NOTICE }] }
+  { id: "6", user: "hana", name: "Hana H", msgs: [{ me: true, text: OURS("hana") }, { notice: true, text: NOTICE }] },
+  // Instagram's label before the preview: still our message last.
+  { id: "7", user: "ivy", name: "Ivy I", label: "AI-generated profile", msgs: [{ me: true, text: OURS("ivy") }] },
+  // A preview without "You:" although our message is last: opened, then not taken for a reply.
+  { id: "8", user: "jack", name: "Jack J", plain: true, msgs: [{ me: true, text: OURS("jack") }] }
 ];
 const THREADS_PAGE = page(`<style>
   body { margin: 0; display: flex; height: 100vh; font: 14px sans-serif; }
@@ -347,7 +352,7 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   const { requests, baseUrl } = await serve(t, "threads");
   const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
   t.after(() => session.close());
-  const sentTo = { carol: [OURS("carol")], frank: [OURS("frank")], hana: [OURS("hana")] };
+  const sentTo = { carol: [OURS("carol")], frank: [OURS("frank")], hana: [OURS("hana")], ivy: [OURS("ivy")], jack: [OURS("jack")] };
 
   const check = await session.readReplies({
     outgoing: async (username) => sentTo[username] || [],
@@ -356,8 +361,10 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   assert.equal(check.status, "ok");
   assert.equal(check.account, "aiglow.test");
   // Carol, Erin and Frank wrote last, Hana's chat ends in Instagram's notice;
-  // Dave's preview is ours, Gina's says Seen.
-  assert.deepEqual([check.rows, check.waiting, check.skipped], [6, 4, 1]);
+  // Dave's preview is ours, Gina's says Seen, Ivy's has a label before "You:";
+  // Jack's looks like theirs until the chat shows our message last.
+  assert.deepEqual([check.rows, check.waiting, check.skipped], [8, 5, 1]);
+  assert.match(check.detail, /ours_last/);
   assert.match(check.detail, /^O:You: Hi dave \| T:Yes interes|T:How to join/);
   assert.deepEqual(check.replies.map(({ key, ...reply }) => reply), [
     // Only what came after our message: not the date, our "Seen" or the box's placeholder.

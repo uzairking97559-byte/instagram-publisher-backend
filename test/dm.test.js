@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { harness, json } = require("./helpers");
-const { parseUsernames, inWindow, nextHourAt } = require("../lib/dm");
+const { parseUsernames, inWindow, nextHourAt, gapFactor } = require("../lib/dm");
 
 const KEY = "test-browser-use-key";
 const PROFILE = "35a603c8-5ea3-415e-a626-eb4d530cdcb4";
@@ -114,6 +114,10 @@ test("usernames come from lines, @names and Instagram links; hours follow India 
   assert.equal(inWindow(new Date("2026-10-18T18:00:00Z"), 8, 23), false, "23:30 in India is outside 8–23");
   assert.equal(inWindow(new Date("2026-10-18T18:00:00Z"), 22, 2), true, "overnight hours");
   assert.equal(nextHourAt(new Date("2026-10-18T18:00:00Z"), 8).toISOString(), "2026-10-19T02:30:00.000Z");
+  // Gaps differ from 0.4× to 1.6× and average the set gap.
+  assert.deepEqual([0, 0.25, 0.5, 0.75, 0.999999].map((r) => Math.round(gapFactor(r) * 100) / 100), [0.4, 0.7, 1, 1.3, 1.6]);
+  const samples = Array.from({ length: 1000 }, (_, index) => gapFactor((index + 0.5) / 1000));
+  assert.equal(Math.round((samples.reduce((sum, value) => sum + value, 0) / samples.length) * 100) / 100, 1);
 });
 
 test("DM Sender needs sign-in and a Browser Use key", async (t) => {
@@ -482,6 +486,46 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.deepEqual([detail.campaign.status, detail.campaign.pause_reason], ["paused", "logged_out"]);
   assert.equal((await account()).check_status, "logged_out");
   assert.equal([...fake.browsers.values()].every((item) => item.status === "stopped"), true);
+});
+
+test("inboxes are also read at 16:00, 19:00 and 22:00 India time for accounts that sent DMs lately", async (t) => {
+  const { h, fake, driver, clock, create, start, tick } = await setup(t);
+  const at = (iso) => { clock.now = new Date(iso); };
+  const id = (await create({ usernames: "one" })).data.campaign.id;
+  await start(id);
+  await tick(); // the DM, then a look at the inbox in the same browser
+  at("2026-10-18T06:39:30Z");
+  await tick(); // nothing left: the campaign completes and its browser closes
+  assert.equal(driver.checks.length, 1);
+  const opened = () => fake.calls.filter((call) => call === "POST /api/v4/browsers").length;
+  assert.equal(opened(), 1);
+
+  // 16:00: one browser just for the inbox, once.
+  at("2026-10-18T10:30:30Z");
+  await tick();
+  assert.equal(driver.checks.length, 2);
+  assert.equal(opened(), 2);
+  at("2026-10-18T10:32:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 2, "once per check hour");
+  // More than an hour after 16:00 and before 19:00: nothing.
+  at("2026-10-18T12:10:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 2);
+  // 19:00: again.
+  at("2026-10-18T13:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
+  // An account Instagram logged out is not opened on a schedule.
+  await h.db.query("UPDATE dm_inboxes SET check_status='logged_out' WHERE profile_id=$1", [PROFILE]);
+  at("2026-10-18T16:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
+  // Three days after its last DM, the account is no longer checked on a schedule.
+  await h.db.query("UPDATE dm_inboxes SET check_status='ok' WHERE profile_id=$1", [PROFILE]);
+  at("2026-10-21T10:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
 });
 
 test("a DM Instagram could not deliver is not counted as sent, and its notice is not a reply", async (t) => {
