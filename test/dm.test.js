@@ -484,6 +484,46 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.equal([...fake.browsers.values()].every((item) => item.status === "stopped"), true);
 });
 
+test("inboxes are also read at 16:00, 19:00 and 22:00 India time for accounts that sent DMs lately", async (t) => {
+  const { h, fake, driver, clock, create, start, tick } = await setup(t);
+  const at = (iso) => { clock.now = new Date(iso); };
+  const id = (await create({ usernames: "one" })).data.campaign.id;
+  await start(id);
+  await tick(); // the DM, then a look at the inbox in the same browser
+  at("2026-10-18T06:39:30Z");
+  await tick(); // nothing left: the campaign completes and its browser closes
+  assert.equal(driver.checks.length, 1);
+  const opened = () => fake.calls.filter((call) => call === "POST /api/v4/browsers").length;
+  assert.equal(opened(), 1);
+
+  // 16:00: one browser just for the inbox, once.
+  at("2026-10-18T10:30:30Z");
+  await tick();
+  assert.equal(driver.checks.length, 2);
+  assert.equal(opened(), 2);
+  at("2026-10-18T10:32:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 2, "once per check hour");
+  // More than an hour after 16:00 and before 19:00: nothing.
+  at("2026-10-18T12:10:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 2);
+  // 19:00: again.
+  at("2026-10-18T13:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
+  // An account Instagram logged out is not opened on a schedule.
+  await h.db.query("UPDATE dm_inboxes SET check_status='logged_out' WHERE profile_id=$1", [PROFILE]);
+  at("2026-10-18T16:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
+  // Three days after its last DM, the account is no longer checked on a schedule.
+  await h.db.query("UPDATE dm_inboxes SET check_status='ok' WHERE profile_id=$1", [PROFILE]);
+  at("2026-10-21T10:31:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 3);
+});
+
 test("a DM Instagram could not deliver is not counted as sent, and its notice is not a reply", async (t) => {
   const { h, driver, cookie, advance, create, campaign, start, tick } = await setup(t, {
     results: { two: { status: "skipped", reason: "not_delivered" } }
