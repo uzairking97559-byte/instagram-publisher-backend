@@ -440,3 +440,21 @@ ALTER TABLE dm_targets ADD COLUMN IF NOT EXISTS sent_profile UUID;
 CREATE INDEX IF NOT EXISTS dm_targets_sent_idx ON dm_targets(sent_at);
 CREATE INDEX IF NOT EXISTS dm_replies_user_idx ON dm_replies(profile_id, username);
 ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS report_sent_on DATE;
+
+-- Joined (lib/leads.js): creators who sent a WhatsApp number or Telegram ID in
+-- a DM reply (or whom the owner added), and how far each one has got.
+CREATE TABLE IF NOT EXISTS creator_leads (
+  id BIGSERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE CHECK (username ~ '^[a-z0-9._]{1,30}$'),
+  name TEXT,
+  profile_id UUID,
+  reply_id BIGINT REFERENCES dm_replies(id) ON DELETE SET NULL,
+  phone TEXT CHECK (phone IS NULL OR phone ~ '^[6-9][0-9]{9}$'),
+  telegram TEXT CHECK (telegram IS NULL OR telegram ~ '^[A-Za-z][A-Za-z0-9_]{4,31}$'),
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'talking', 'logo_sent', 'working', 'declined')),
+  source TEXT NOT NULL DEFAULT 'dm' CHECK (source IN ('dm', 'manual')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS creator_leads_created_idx ON creator_leads(created_at);

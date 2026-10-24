@@ -32,7 +32,10 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    website, saved answers, **Hisaab** (per account and per message version: reach, replies,
    ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
    and posts a morning report of the day before.
-3. **Creators** — **Finder**: from seed creators, read each profile (followers, last post,
+3. **Creators** — **Joined**: creators who sent a WhatsApp number or Telegram ID in a DM
+   reply (picked out automatically, announced on Telegram) or were added by hand, with
+   status Naya → Baat hui → Logo bheja → Kaam shuru / Mana, notes and a copyable report.
+   **Finder**: from seed creators, read each profile (followers, last post,
    average views) and Instagram's "Similar accounts" with a separate Instagram login, and
    keep a list to review and copy (nobody is messaged). **List check**: which usernames
    still exist and post recently, through Business Discovery (needs a Facebook Login
@@ -56,6 +59,7 @@ README.md describes each feature and the API in detail; keep it in sync when beh
 | `lib/dm.js` | DM worker: campaigns, pacing, warm-up, replies/outbox, costs, owner API |
 | `lib/telegram.js` | Telegram bot: webhook, link code, menu, replies → bot, answers ← bot, alerts, digest |
 | `lib/instagram-finder.js`, `lib/finder.js` | Finder driver (web app JSON, page fallback) and worker/API |
+| `lib/leads.js` | Joined list: contact parsing from replies (`extractContact`), owner API |
 | `lib/checks.js` | Creator list check (Business Discovery) |
 | `public/` | The website: `index.html`, `app.js`, `styles.css`, `about.html`, fonts. No build step |
 | `test/` | `node:test` suites; `helpers.js` builds the app on PGlite with mocked outbound calls |

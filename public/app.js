@@ -70,12 +70,12 @@ let storage = null;
 const ALL_ACCOUNTS = "all";
 // Three parts, each with its own pages: the bottom bar (left rail on a computer)
 // picks the part, the tabs under "Aaj" pick the page.
-const SECTIONS = { posting: ["connections", "composer", "activity"], messages: ["replies", "campaigns", "dm-create"], creators: ["finder", "creators"] };
+const SECTIONS = { posting: ["connections", "composer", "activity"], messages: ["replies", "campaigns", "dm-create"], creators: ["joined", "finder", "creators"] };
 const VIEWS = Object.values(SECTIONS).flat();
 const sectionOf = (view) => Object.keys(SECTIONS).find((key) => SECTIONS[key].includes(view));
 // The page last open in each part, so going back to a part returns to it.
 const lastView = (() => {
-  const saved = { posting: "connections", messages: "replies", creators: "finder" };
+  const saved = { posting: "connections", messages: "replies", creators: "joined" };
   try { Object.assign(saved, JSON.parse(readSetting("publisher-last-views") || "{}")); } catch { /* ignore */ }
   for (const key of Object.keys(SECTIONS)) if (!SECTIONS[key].includes(saved[key])) saved[key] = SECTIONS[key][0];
   return saved;
@@ -1071,8 +1071,8 @@ $("logout").addEventListener("click", async () => {
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
     finderState = null; finderProfilesLoaded = false; finderOpen.clear(); finderFilter.clear(); finderResults.clear();
-    dmStats = null;
-    renderDm(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
+    dmStats = null; leadState = null; leadFilter = "all";
+    renderDm(); renderLeads(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1313,6 +1313,7 @@ async function loadDm() {
   void loadDmStats().catch(() => {});
   void loadFinder().catch(() => {});
   void loadReplies().catch(() => {});
+  void loadLeads().catch(() => {});
 }
 function renderDm() {
   renderToday();
@@ -1336,7 +1337,7 @@ function updateDmPolling() {
       if ($("workspace").hidden || sectionOf(currentView) === "posting") { updateDmPolling(); return; }
       // Don't redraw the cards while the owner is typing in one of them.
       const focused = document.activeElement;
-      if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused) || $("finder").contains(focused)) && focused.matches("input, textarea, select")) return;
+      if (focused && ($("dm-campaigns").contains(focused) || $("replies").contains(focused) || $("finder").contains(focused) || $("joined").contains(focused)) && focused.matches("input, textarea, select")) return;
       void loadDm().catch(explain);
     }, 20000);
   }
@@ -1774,6 +1775,23 @@ function replyCard(reply) {
       catch (error) { explain(error); done.disabled = false; }
     });
     actions.append(done);
+  }
+  // Joined: the number / Telegram ID is picked up by itself; this adds the rest.
+  if (reply.username) {
+    if (reply.joined) actions.append(element("span", "Joined ✓", "badge lead-working"));
+    else {
+      const join = element("button", "Joined mein daalo", "quiet"); join.type = "button";
+      join.addEventListener("click", async () => {
+        join.disabled = true;
+        try {
+          leadState = await api("/api/leads", { method: "POST", body: JSON.stringify({ reply_id: reply.id }) });
+          reply.joined = true;
+          renderReplies(); renderLeads();
+          notice(`@${reply.username} Joined list mein aa gaya. Creators → Joined mein dekho.`);
+        } catch (error) { explain(error); join.disabled = false; }
+      });
+      actions.append(join);
+    }
   }
   // Saved answers: a tap fills the box (the creator's name filled in); edit, then Bhejo.
   const quick = element("div", undefined, "reply-quick");
@@ -2406,6 +2424,158 @@ $("finder-form").addEventListener("submit", async (event) => {
     $("finder-name").value = ""; $("finder-seeds").value = ""; $("finder-new").open = false;
     updateFinderEstimate();
     await loadFinder();
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+// ---- Joined: creators who sent a WhatsApp number or Telegram ID ----
+Object.assign(messages, {
+  invalid_lead: "Sahi Instagram username daalo. WhatsApp number 10 digit ka (6–9 se shuru) aur Telegram ID 5–32 akshar ki honi chahiye.",
+  lead_not_found: "Ye creator list mein nahi mila. Refresh karo."
+});
+const LEAD_STATUSES = [["new", "Naya"], ["talking", "Baat hui"], ["logo_sent", "Logo bheja"], ["working", "Kaam shuru"], ["declined", "Mana"]];
+const LEAD_LABELS = Object.fromEntries(LEAD_STATUSES);
+let leadState = null;
+let leadFilter = "all";
+async function loadLeads() {
+  leadState = await api("/api/leads");
+  renderLeads();
+}
+// 98765 43210
+function phoneText(phone) { return `${phone.slice(0, 5)} ${phone.slice(5)}`; }
+function leadLink(text, href, className = "quiet small") {
+  const link = element("a", text, className);
+  link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer";
+  return link;
+}
+function renderLeads() {
+  const counts = leadState?.counts;
+  $("joined-tab-count").hidden = !counts?.new;
+  $("joined-tab-count").textContent = counts?.new ? String(counts.new) : "";
+  const box = $("joined-counts");
+  box.replaceChildren();
+  if (counts) {
+    for (const [value, label, tone] of [[counts.total, "Total", ""], [counts.today, "Aaj naye", counts.today ? "good" : ""],
+      [counts.new + counts.talking + counts.logo_sent, "Baat chal rahi", ""], [counts.working, "Kaam shuru", counts.working ? "good" : ""]]) {
+      const stat = element("div", undefined, tone ? `stat ${tone}` : "stat");
+      stat.append(element("strong", String(value)), element("span", label));
+      box.append(stat);
+    }
+  }
+  for (const chip of document.querySelectorAll("#joined-filter .reply-chip")) {
+    const key = chip.dataset.status;
+    chip.setAttribute("aria-pressed", String(key === leadFilter));
+    const label = key === "all" ? "Sab" : LEAD_LABELS[key];
+    chip.textContent = counts && key !== "all" && counts[key] ? `${label} (${counts[key]})` : label;
+  }
+  $("joined-copy").hidden = !counts?.total;
+  const list = $("joined-list");
+  list.replaceChildren();
+  if (!leadState) return;
+  const shown = leadState.leads.filter((lead) => leadFilter === "all" || lead.status === leadFilter);
+  if (!shown.length) {
+    list.append(element("p", counts.total ? "Is status mein abhi koi creator nahi."
+      : "Abhi koi nahi. Jab koi creator DM mein WhatsApp number ya Telegram ID bhejega, wo yahan aa jayega.", "empty"));
+  }
+  for (const lead of shown) list.append(leadCard(lead));
+}
+function leadCard(lead) {
+  const card = element("article", undefined, `job-card lead-card${lead.status === "new" ? " fresh" : ""}`);
+  const head = element("div", undefined, "job-head");
+  head.append(leadLink(`@${lead.username}`, `https://www.instagram.com/${encodeURIComponent(lead.username)}/`, "lead-name"),
+    element("span", LEAD_LABELS[lead.status] || lead.status, `badge lead-${lead.status}`));
+  card.append(head);
+  const meta = [lead.name, lead.account ? `@${lead.account} se` : lead.source === "manual" ? "khud daala" : null, formatWhen(lead.created_at)].filter(Boolean);
+  card.append(element("p", meta.join(" · "), "job-meta"));
+  const contact = element("div", undefined, "dm-actions lead-contact");
+  if (lead.phone) contact.append(leadLink(`WhatsApp ${phoneText(lead.phone)} ↗`, `https://wa.me/91${lead.phone}`, "quiet small strong"));
+  if (lead.telegram) contact.append(leadLink(`Telegram @${lead.telegram} ↗`, `https://t.me/${encodeURIComponent(lead.telegram)}`, "quiet small strong"));
+  if (!lead.phone && !lead.telegram) contact.append(element("span", "Number / Telegram ID abhi nahi hai. Neeche “Badlo” mein daalo.", "hint"));
+  card.append(contact);
+  if (lead.note) card.append(element("p", lead.note, "lead-note"));
+
+  const save = async (body, button) => {
+    if (button) button.disabled = true;
+    try { leadState = await api(`/api/leads/${encodeURIComponent(lead.id)}`, { method: "PUT", body: JSON.stringify(body) }); renderLeads(); return true; }
+    catch (error) { explain(error); if (button) button.disabled = false; return false; }
+  };
+  const actions = element("div", undefined, "dm-actions");
+  const select = document.createElement("select");
+  select.className = "lead-status";
+  select.setAttribute("aria-label", `@${lead.username} ka status`);
+  for (const [value, label] of LEAD_STATUSES) {
+    const option = element("option", label); option.value = value; select.append(option);
+  }
+  select.value = lead.status;
+  select.addEventListener("change", async () => {
+    select.disabled = true;
+    if (!await save({ status: select.value })) { select.value = lead.status; select.disabled = false; }
+  });
+  actions.append(select);
+  card.append(actions);
+
+  const edit = document.createElement("details");
+  edit.className = "batch-details";
+  edit.append(element("summary", "Badlo: number, Telegram, note"));
+  const form = element("form", undefined, "dm-form");
+  const field = (label, value, type, max) => {
+    const wrap = element("label", label);
+    const input = document.createElement("input");
+    input.type = type; input.maxLength = max; input.value = value || ""; input.autocomplete = "off";
+    wrap.append(input);
+    form.append(wrap);
+    return input;
+  };
+  const phone = field("WhatsApp number", lead.phone, "tel", 20);
+  const telegram = field("Telegram ID", lead.telegram ? `@${lead.telegram}` : "", "text", 60);
+  const note = field("Note (jaise: logo bheja, 2 Reels)", lead.note, "text", 300);
+  const row = element("div", undefined, "dm-actions");
+  const ok = element("button", "Save", "quiet strong small"); ok.type = "submit";
+  const remove = element("button", "List se hatao", "quiet small danger"); remove.type = "button";
+  remove.addEventListener("click", async () => {
+    if (!confirm(`@${lead.username} ko Joined list se hatana hai?`)) return;
+    remove.disabled = true;
+    try { leadState = await api(`/api/leads/${encodeURIComponent(lead.id)}`, { method: "DELETE" }); renderLeads(); }
+    catch (error) { explain(error); remove.disabled = false; }
+  });
+  row.append(ok, remove);
+  form.append(row);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (await save({ phone: phone.value.trim(), telegram: telegram.value.trim(), note: note.value }, ok)) notice(`@${lead.username} save ho gaya.`);
+  });
+  edit.append(form);
+  card.append(edit);
+  return card;
+}
+// A short report for the brand: how many joined, talking and working.
+function leadReport() {
+  const { counts, leads } = leadState;
+  const working = leads.filter((lead) => lead.status === "working").map((lead) => `@${lead.username}`);
+  const lines = [`Creators update (${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })})`,
+    `Joined: ${counts.total} (aaj ${counts.today} naye)`, `Baat chal rahi: ${counts.new + counts.talking}`, `Logo bheja: ${counts.logo_sent}`,
+    `Kaam shuru: ${counts.working}`];
+  if (working.length) lines.push("", "Kaam shuru karne wale:", ...working.slice(0, 50));
+  return lines.join("\n");
+}
+for (const chip of document.querySelectorAll("#joined-filter .reply-chip")) {
+  chip.addEventListener("click", () => { leadFilter = chip.dataset.status; renderLeads(); });
+}
+$("joined-reload").addEventListener("click", () => loadLeads().catch(explain));
+$("joined-copy").addEventListener("click", async () => {
+  if (!leadState) return;
+  try { await navigator.clipboard.writeText(leadReport()); notice("Report copy ho gayi. WhatsApp ya Telegram par paste karo."); }
+  catch { notice("Copy nahi ho paya. Browser ko clipboard ki permission do.", true); }
+});
+$("joined-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("joined-save"); button.disabled = true;
+  try {
+    leadState = await api("/api/leads", { method: "POST", body: JSON.stringify({
+      username: $("joined-username").value.trim(), phone: $("joined-phone").value.trim(), telegram: $("joined-telegram").value.trim() }) });
+    $("joined-username").value = ""; $("joined-phone").value = ""; $("joined-telegram").value = ""; $("joined-new").open = false;
+    leadFilter = "all";
+    renderLeads();
+    notice("Creator Joined list mein aa gaya.");
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });

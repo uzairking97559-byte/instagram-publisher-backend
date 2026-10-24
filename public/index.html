@@ -78,6 +78,7 @@
             <button id="tab-dm-create" type="button" role="tab" aria-controls="dm-create" aria-selected="false" tabindex="-1">Naya campaign</button>
           </div>
           <div id="subnav-creators" class="subnav" role="tablist" aria-label="Creators" hidden>
+            <button id="tab-joined" type="button" role="tab" aria-controls="joined" aria-selected="false" tabindex="-1">Joined <span id="joined-tab-count" class="tab-count" hidden></span></button>
             <button id="tab-finder" type="button" role="tab" aria-controls="finder" aria-selected="false" tabindex="-1">Finder</button>
             <button id="tab-creators" type="button" role="tab" aria-controls="creators" aria-selected="false" tabindex="-1">List check</button>
           </div>
@@ -264,6 +265,37 @@
         </section>
 
         <!-- Creators -->
+        <section id="joined" class="view" role="tabpanel" aria-labelledby="tab-joined" hidden>
+          <div class="view-head">
+            <div><h2>Joined creators</h2><p class="muted">Jinhone DM mein apna WhatsApp number ya Telegram ID bheja, wo apne aap yahan aa jate hain (Telegram bot par alert bhi aata hai). Unse baat karo aur status badalte raho.</p></div>
+            <button id="joined-reload" class="quiet small" type="button">Refresh</button>
+          </div>
+          <div id="joined-counts" class="stats joined-counts"></div>
+          <div id="joined-filter" class="reply-filter joined-filter" role="group" aria-label="Kis status ke creators dikhayein">
+            <button type="button" class="reply-chip" data-status="all" aria-pressed="true">Sab</button>
+            <button type="button" class="reply-chip" data-status="new" aria-pressed="false">Naye</button>
+            <button type="button" class="reply-chip" data-status="talking" aria-pressed="false">Baat hui</button>
+            <button type="button" class="reply-chip" data-status="logo_sent" aria-pressed="false">Logo bheja</button>
+            <button type="button" class="reply-chip" data-status="working" aria-pressed="false">Kaam shuru</button>
+            <button type="button" class="reply-chip" data-status="declined" aria-pressed="false">Mana</button>
+          </div>
+          <div id="joined-list" class="jobs"></div>
+          <div class="dm-actions"><button id="joined-copy" class="quiet" type="button">Report copy karo</button></div>
+          <details id="joined-new" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Khud se creator daalo</summary>
+            <form id="joined-form" class="dm-form">
+              <label for="joined-username">Instagram username</label>
+              <input id="joined-username" type="text" maxlength="80" required autocomplete="off" spellcheck="false" placeholder="@creator_name">
+              <label for="joined-phone">WhatsApp number <span class="muted">(agar hai)</span></label>
+              <input id="joined-phone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="98765 43210">
+              <label for="joined-telegram">Telegram ID <span class="muted">(agar hai)</span></label>
+              <input id="joined-telegram" type="text" maxlength="60" autocomplete="off" spellcheck="false" placeholder="@telegram_id">
+              <button id="joined-save" class="primary" type="submit">Joined mein daalo</button>
+            </form>
+          </details>
+          <div class="side-note"><strong>Kaise kaam karta hai.</strong><p>Taiyaar jawab mein likho: “Apna WhatsApp number ya Telegram ID bhejo”. Jo bhejega, wo yahan aa jayega. Number na pakda gaya ho to Replies mein us reply par “Joined mein daalo” dabao. Telegram channel ka invite link sirf inhi ko bhejo.</p></div>
+        </section>
+
         <section id="finder" class="view" role="tabpanel" aria-labelledby="tab-finder" hidden>
           <div class="view-head">
             <div><h2>Creator finder</h2><p class="muted">Kuch creators ke naam do. Website Instagram ke “Similar accounts” se naye creators dhundhegi aur har ek ke followers, aakhri post aur views dekhegi. Kisi ko message nahi jata.</p></div>
