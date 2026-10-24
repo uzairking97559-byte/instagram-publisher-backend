@@ -1,3 +1,5 @@
+> **Historical note (9 Oct 2026), kept for reference only.** It describes the first security review, before PR #1 was merged. The instructions in it no longer apply; see `CLAUDE.md` and `README.md` for the current project.
+
 # Instagram Publisher repair checkpoint — 9 October 2026 (IST)
 
 ## Scope and authorization
