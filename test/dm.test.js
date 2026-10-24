@@ -306,6 +306,45 @@ test("each DM uses one version of the message with the creator's username in it"
   assert.equal((await create({ message: Array.from({ length: 11 }, (_, i) => `v${i}`).join("\n---\n") })).data.error, "invalid_campaign");
 });
 
+test("hisaab: DMs, replies and cost per account and per message version", async (t) => {
+  const { h, clock, cookie, advance, create, start, tick } = await setup(t, { results: { five: { status: "skipped", reason: "not_delivered" } } });
+  const id = (await create({ usernames: "one\ntwo\nthree\nfour\nfive\nsix", message: "A {username}\n---\nB {username}\n---\nC {username}" })).data.campaign.id;
+  const send = async (count) => { for (let index = 0; index < count; index++) { await tick(); advance(9 * 60000 + 1000); } };
+  // Three DMs with version B (random 0.5 picks the middle one) ...
+  await start(id, { stop_after: 3 });
+  await send(3);
+  // ... then the message changes and the rest get version Y; five can't receive DMs.
+  assert.equal((await h.request(`/api/dm/campaigns/${id}`, { method: "PUT", cookie, body: { message: "X {username}\n---\nY {username}" } })).status, 200);
+  await start(id);
+  await send(4);
+  const reply = (username, status = "new") => h.db.query(
+    "INSERT INTO dm_replies(profile_id,thread,username,name,row_key,text,status,received_at) VALUES($1,$2,$3,$3,$4,'Yes',$5,$6)",
+    [PROFILE, `/direct/t/${username}/`, username, `${username}|Yes`, status, clock.now]);
+  await reply("one"); await reply("four", "answered"); await reply("two", "undelivered"); await reply("zed");
+  advance(1000);
+
+  const stats = async (period) => (await h.request(`/api/dm/stats${period ? `?period=${period}` : ""}`, { cookie })).data;
+  const all = await stats("all");
+  assert.equal(all.period, "all");
+  const { sent, not_delivered, replied, reply_rate, replies_received, answers_sent } = all.totals;
+  assert.deepEqual({ sent, not_delivered, replied, reply_rate, replies_received, answers_sent },
+    { sent: 5, not_delivered: 1, replied: 2, reply_rate: 40, replies_received: 3, answers_sent: 0 });
+  assert.ok(all.totals.cost_inr > 0);
+  assert.equal(all.totals.per_reply_inr, Math.round((all.totals.cost_inr / 2) * 100) / 100);
+  assert.equal(all.accounts.length, 1);
+  assert.deepEqual([all.accounts[0].profile_id, all.accounts[0].sent, all.accounts[0].replied], [PROFILE, 5, 2]);
+  assert.deepEqual(all.versions.map(({ text, current, sent: count, not_delivered: missed, replied: answered, reply_rate: rate }) => ({ text, current, count, missed, answered, rate })), [
+    { text: "B {username}", current: false, count: 3, missed: 0, answered: 1, rate: 33.3 },
+    { text: "Y {username}", current: true, count: 2, missed: 1, answered: 1, rate: 50 }
+  ]);
+  // Today and the last 7 days hold the same DMs; nothing before the period counts.
+  assert.equal((await stats("1")).totals.sent, 5);
+  assert.equal((await stats()).period, "7");
+  advance(8 * 86400000);
+  assert.equal((await stats("7")).totals.sent, 0);
+  assert.equal((await stats("all")).totals.sent, 5);
+});
+
 test("one account runs one campaign at a time; a running campaign cannot be deleted", async (t) => {
   const { h, cookie, create, start } = await setup(t);
   const first = (await create()).data.campaign.id;

@@ -88,9 +88,9 @@ test("telegram: linked once from the website, then replies come in and answers g
   // Then the main menu, as buttons; the Menu button beside the box lists the commands.
   const home = fake.sent.at(-1);
   assert.equal(home.text, "🏠 Main menu");
-  assert.deepEqual(home.reply_markup.inline_keyboard.flat().map((button) => button.callback_data), ["m:replies", "m:check", "m:aaj", "m:camps", "m:tpl"]);
+  assert.deepEqual(home.reply_markup.inline_keyboard.flat().map((button) => button.callback_data), ["m:replies", "m:check", "m:aaj", "m:kal", "m:camps", "m:tpl"]);
   assert.deepEqual(fake.calls.find((call) => call.method === "setMyCommands").body.commands.map((item) => item.command),
-    ["menu", "replies", "check", "aaj", "campaigns", "jawab"]);
+    ["menu", "replies", "check", "aaj", "kal", "campaigns", "jawab"]);
   // The code works once.
   await hook({ message: { message_id: 2, chat: { id: 777, type: "private" }, text: `/start ${code}` } });
   assert.match(fake.sent.at(-1).text, /purana ho gaya ya galat/);
@@ -188,6 +188,38 @@ test("telegram: linked once from the website, then replies come in and answers g
   const count = fake.sent.length;
   await say("/aaj");
   assert.equal(fake.sent.length, count);
+});
+
+test("telegram: a morning report of the day before at 9:00 India time, and on /kal", async (t) => {
+  const { h, fake, clock, cookie, say, tick, worker } = await setup(t);
+  const link = (await h.request("/api/telegram/link", { method: "POST", cookie, body: {} })).data.url;
+  await say(`/start ${link.split("start=")[1]}`);
+  // Two DMs on 18 Oct, a reply from one of them, and an Instagram warning.
+  const campaign = (await h.request("/api/dm/campaigns", { method: "POST", cookie, body: {
+    name: "Commenters", profile_id: PROFILE, profile_name: "Personal Profile", message: "A {username}\n---\nB {username}", usernames: "one\ntwo\nthree",
+    daily_limit: 100, gap_minutes: 9, start_hour: 8, end_hour: 23, requested_contact: true } })).data.campaign;
+  await h.request(`/api/dm/campaigns/${campaign.id}/start`, { method: "POST", cookie, body: {} });
+  await worker();
+  clock.now = new Date(clock.now.getTime() + 10 * 60000);
+  await worker();
+  await h.db.query("INSERT INTO dm_replies(profile_id,thread,username,name,row_key,text,received_at) VALUES($1,'/direct/t/1/','one','One','One|Yes','Yes',$2)", [PROFILE, clock.now]);
+  await h.db.query(`INSERT INTO dm_inboxes(profile_id,last_warning_at) VALUES($1,$2)
+    ON CONFLICT (profile_id) DO UPDATE SET last_warning_at=EXCLUDED.last_warning_at`, [PROFILE, clock.now]);
+
+  // Not before 9:00 the next morning.
+  clock.now = new Date("2026-10-19T02:30:00.000Z");
+  await tick();
+  assert.equal(fake.sent.some((message) => message.text.startsWith("📅")), false);
+  clock.now = new Date("2026-10-19T03:35:00.000Z");
+  await tick();
+  const reports = fake.sent.filter((message) => message.text.startsWith("📅"));
+  assert.equal(reports.length, 1);
+  assert.match(reports[0].text, /^📅 Kal ki report \(18 Oct\)\n\nDM gaye: 2\nReply aaye: 1 · Tumhare jawab gaye: 0\nKharcha: ₹\d+\.\d\d · ek reply ₹\d+\.\d\d\n\n⚠️ (@aiglow\.artlab|Personal Profile) par kal Instagram ne warning/);
+  await tick();
+  assert.equal(fake.sent.filter((message) => message.text.startsWith("📅")).length, 1, "once a day");
+  // The same report on request.
+  await say("/kal");
+  assert.equal(fake.sent.at(-1).text, reports[0].text);
 });
 
 test("telegram: without a token the website works and the bot parts say so", async (t) => {

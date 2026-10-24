@@ -210,6 +210,17 @@
           <p id="dm-setup" class="dm-note" hidden>Browser Use key abhi set nahi hai. Render dashboard → is service → Environment mein <strong>BROWSER_USE_API_KEY</strong> daalo (key kabhi chat ya kisi ko mat bhejo). Tab tak campaign aur list bana sakte ho, bhejna shuru nahi hoga.</p>
           <div id="dm-campaigns" class="jobs"></div>
           <button id="dm-new-open" class="quiet wide" type="button"><span class="plus" aria-hidden="true">+</span>Naya DM campaign banao</button>
+          <section id="dm-stats" class="job-card dm-stats" aria-labelledby="dm-stats-title" hidden>
+            <div class="job-head"><strong id="dm-stats-title">Hisaab</strong></div>
+            <p class="job-meta">Kaunsa account aur kaunsa message chal raha hai. Reply rate = jinhe DM pahuncha, unme se kitno ne jawab diya.</p>
+            <div class="reply-filter" role="group" aria-label="Kitne din ka hisaab">
+              <button type="button" class="reply-chip" data-period="1" aria-pressed="false">Aaj</button>
+              <button type="button" class="reply-chip" data-period="7" aria-pressed="true">7 din</button>
+              <button type="button" class="reply-chip" data-period="30" aria-pressed="false">30 din</button>
+              <button type="button" class="reply-chip" data-period="all" aria-pressed="false">Sab</button>
+            </div>
+            <div id="dm-stats-body"></div>
+          </section>
           <div class="side-note"><strong>Account ki safety.</strong><p>Har DM ke beech gap rehta hai aur sirf chune hue ghanton mein DM jaate hain. Instagram koi warning de, logout kare ya security check maange to campaign apne aap ruk jayega; Instagram app mein check karke hi dobara Start karo.</p></div>
         </section>
 

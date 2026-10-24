@@ -432,3 +432,11 @@ CREATE TABLE IF NOT EXISTS finder_worker_lease (
   owner TEXT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Hisaab (lib/dm.js stats): which message version and which account sent each
+-- DM, and when the morning Telegram report (lib/telegram.js) last went out.
+ALTER TABLE dm_targets ADD COLUMN IF NOT EXISTS variant TEXT;
+ALTER TABLE dm_targets ADD COLUMN IF NOT EXISTS sent_profile UUID;
+CREATE INDEX IF NOT EXISTS dm_targets_sent_idx ON dm_targets(sent_at);
+CREATE INDEX IF NOT EXISTS dm_replies_user_idx ON dm_replies(profile_id, username);
+ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS report_sent_on DATE;
