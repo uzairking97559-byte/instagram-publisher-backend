@@ -1071,8 +1071,8 @@ $("logout").addEventListener("click", async () => {
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
     finderState = null; finderProfilesLoaded = false; finderOpen.clear(); finderFilter.clear(); finderResults.clear();
-    dmStats = null; leadState = null; leadFilter = "all"; leadReferrer = "";
-    renderDm(); renderLeads(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
+    dmStats = null; leadState = null; leadFilter = "all"; leadReferrer = ""; botState = null;
+    renderDm(); renderLeads(); renderCreatorBot(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
 });
@@ -1314,6 +1314,7 @@ async function loadDm() {
   void loadFinder().catch(() => {});
   void loadReplies().catch(() => {});
   void loadLeads().catch(() => {});
+  void loadCreatorBot().catch(() => {});
 }
 function renderDm() {
   renderToday();
@@ -2623,7 +2624,7 @@ function leadReport() {
 for (const chip of document.querySelectorAll("#joined-filter .reply-chip")) {
   chip.addEventListener("click", () => { leadFilter = chip.dataset.status; renderLeads(); });
 }
-$("joined-reload").addEventListener("click", () => loadLeads().catch(explain));
+$("joined-reload").addEventListener("click", () => { loadLeads().catch(explain); loadCreatorBot().catch(() => {}); });
 $("joined-copy").addEventListener("click", async () => {
   if (!leadState) return;
   try { await navigator.clipboard.writeText(leadReport()); notice("Report copy ho gayi. WhatsApp ya Telegram par paste karo."); }
@@ -2667,6 +2668,72 @@ $("joined-import-form").addEventListener("submit", async (event) => {
     if (data.same) parts.push(`${data.same} pehle se the`);
     if (data.invalid.length) parts.push(`${data.invalid.length}${data.invalid_more ? "+" : ""} line samajh nahi aayi: ${data.invalid.slice(0, 3).join(" | ")}`);
     notice(parts.join(" · ") + ".");
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+// ---- Workwithme: the creators' Telegram bot ----
+Object.assign(messages, {
+  invalid_support: "Telegram username 5–32 akshar ka hota hai (jaise @aapka_username).",
+  reel_not_found: "Ye Reel ab nahi mili. Refresh karo."
+});
+let botState = null;
+async function loadCreatorBot() {
+  botState = await api("/api/creator-bot");
+  renderCreatorBot();
+}
+function renderCreatorBot() {
+  const card = $("wwm");
+  card.hidden = !botState;
+  if (!botState) return;
+  const state = $("wwm-state");
+  state.textContent = botState.configured ? "Chalu" : "Token nahi";
+  state.className = `badge ${botState.configured ? "published" : "failed"}`;
+  const c = botState.counts;
+  $("wwm-line").textContent = !botState.configured
+    ? "Render → Environment mein WORKWITHME_BOT_TOKEN daalo (token kisi chat mein mat bhejna)."
+    : [botState.bot ? `@${botState.bot}` : null, `${c.pages} pages jude`, `${c.approved} approve`, `${c.reels} Reels`, `${c.managers} managers`].filter(Boolean).join(" · ");
+  const box = $("wwm-pending");
+  box.replaceChildren();
+  if (botState.pending.length) box.append(element("p", `Pehli Reel approval ke liye (${botState.pending.length}):`, "wwm-pending-title"));
+  for (const item of botState.pending) {
+    const row = element("div", undefined, "dm-target wwm-row");
+    const who = element("span");
+    who.append(element("strong", item.username ? `@${item.username}` : item.name || "Creator"));
+    if (item.referrer) who.append(element("small", ` · Laya: ${item.referrer}`));
+    const actions = element("span", undefined, "wwm-actions");
+    actions.append(leadLink("Reel ↗", item.url));
+    for (const [label, approve, cls] of [["Approve", true, "quiet small strong"], ["Reject", false, "quiet small danger"]]) {
+      const button = element("button", label, cls); button.type = "button";
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          botState = await api(`/api/creator-bot/reels/${encodeURIComponent(item.id)}/review`, { method: "POST", body: JSON.stringify({ approve }) });
+          renderCreatorBot();
+          void loadLeads().catch(() => {});
+          notice(approve ? "Approve ho gaya. Creator ko advance ke liye UPI bhejne ko bola gaya." : "Reject ho gaya. Creator ko nayi Reel bhejne ko bola gaya.");
+        } catch (error) { explain(error); button.disabled = false; }
+      });
+      actions.append(button);
+    }
+    row.append(who, actions);
+    box.append(row);
+  }
+  const set = botState.settings;
+  if (!$("wwm-form").contains(document.activeElement)) {
+    $("wwm-support").value = set.support_username ? `@${set.support_username}` : "";
+    $("wwm-rules").value = set.rules;
+    $("wwm-note").value = set.first_reel_note;
+  }
+  $("wwm-files").textContent = `Logo: ${set.logo ? "✓ laga hai" : "abhi nahi"} · Guide video: ${set.guide ? "✓ laga hai" : "abhi nahi"}`;
+}
+$("wwm-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("wwm-save"); button.disabled = true;
+  try {
+    botState = await api("/api/creator-bot", { method: "PUT", body: JSON.stringify({
+      support_username: $("wwm-support").value, rules: $("wwm-rules").value, first_reel_note: $("wwm-note").value }) });
+    renderCreatorBot();
+    notice("Bot settings save ho gayi.");
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });

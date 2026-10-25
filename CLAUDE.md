@@ -31,7 +31,9 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    fixed steps (no AI model per message). **Replies** per account, answers typed on the
    website, saved answers, **Hisaab** (per account and per message version: reach, replies,
    ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
-   and posts a morning report of the day before.
+   and posts a morning report of the day before. A second bot, **Workwithme**, talks to
+   creators: page link, logo and rules, first Reel approved by the owner, UPI, every Reel
+   link, and manager links.
 3. **Creators** — **Joined**: creators who sent a WhatsApp number or Telegram ID in a DM
    reply (picked out automatically, announced on Telegram), old creators pasted in bulk, or
    added by hand, with status Naya → Baat hui → Logo bheja → Kaam shuru / Mana, notes,
@@ -60,7 +62,8 @@ README.md describes each feature and the API in detail; keep it in sync when beh
 | `lib/dm.js` | DM worker: campaigns, pacing, warm-up, replies/outbox, costs, owner API |
 | `lib/telegram.js` | Telegram bot: webhook, link code, menu, replies → bot, answers ← bot, alerts, digest |
 | `lib/instagram-finder.js`, `lib/finder.js` | Finder driver (web app JSON, page fallback) and worker/API |
-| `lib/leads.js` | Joined list: contact parsing from replies (`extractContact`), owner API |
+| `lib/leads.js` | Joined list: contact parsing from replies (`extractContact`), import, referrers, target, owner API |
+| `lib/creator-bot.js` | Workwithme, the creators' Telegram bot: join, page, logo/rules, first-Reel approval, UPI, Reel links, managers |
 | `lib/checks.js` | Creator list check (Business Discovery) |
 | `public/` | The website: `index.html`, `app.js`, `styles.css`, `about.html`, fonts. No build step |
 | `test/` | `node:test` suites; `helpers.js` builds the app on PGlite with mocked outbound calls |
@@ -132,4 +135,4 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
 `BROWSER_USE_API_KEY`, `DM_PROXY_COUNTRY`, `DM_USD_INR`, `DM_SEND_METHOD` (`profile` to send
 from profile pages instead of the inbox), `DM_CHECK_HOURS` (fixed inbox checks, default
 `16,19,22`), `CHECK_INTERVAL_SECONDS`, `TELEGRAM_BOT_TOKEN`,
-`TELEGRAM_BOT_USERNAME`, `NODE_ENV`, `PORT`, `RENDER`.
+`TELEGRAM_BOT_USERNAME`, `WORKWITHME_BOT_TOKEN`, `WORKWITHME_BOT_USERNAME`, `NODE_ENV`, `PORT`, `RENDER`.

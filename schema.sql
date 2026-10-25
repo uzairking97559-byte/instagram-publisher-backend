@@ -463,10 +463,51 @@ CREATE INDEX IF NOT EXISTS creator_leads_created_idx ON creator_leads(created_at
 ALTER TABLE creator_leads ALTER COLUMN username DROP NOT NULL;
 ALTER TABLE creator_leads ADD COLUMN IF NOT EXISTS referrer TEXT;
 ALTER TABLE creator_leads DROP CONSTRAINT IF EXISTS creator_leads_source_check;
-ALTER TABLE creator_leads ADD CONSTRAINT creator_leads_source_check CHECK (source IN ('dm', 'manual', 'import'));
+ALTER TABLE creator_leads ADD CONSTRAINT creator_leads_source_check CHECK (source IN ('dm', 'manual', 'import', 'bot'));
 CREATE INDEX IF NOT EXISTS creator_leads_phone_idx ON creator_leads(phone);
 CREATE TABLE IF NOT EXISTS lead_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   target INTEGER NOT NULL DEFAULT 50 CHECK (target BETWEEN 1 AND 100000),
   deadline DATE
+);
+
+-- Workwithme bot (lib/creator-bot.js): creators join on Telegram, send their
+-- Instagram page and their first Reel for approval, then every Reel link;
+-- managers get a code that marks the pages they bring.
+CREATE TABLE IF NOT EXISTS creator_bot_users (
+  chat_id BIGINT PRIMARY KEY,
+  tg_username TEXT,
+  tg_name TEXT,
+  lead_id BIGINT REFERENCES creator_leads(id) ON DELETE SET NULL,
+  state TEXT NOT NULL DEFAULT 'new' CHECK (state IN ('new', 'await_profile', 'await_first_reel', 'pending', 'await_upi', 'approved')),
+  ref_code TEXT,
+  manager_code TEXT UNIQUE,
+  manager_label TEXT,
+  upi TEXT,
+  approved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS creator_bot_users_lead_idx ON creator_bot_users(lead_id);
+CREATE TABLE IF NOT EXISTS creator_reels (
+  id BIGSERIAL PRIMARY KEY,
+  chat_id BIGINT NOT NULL,
+  lead_id BIGINT REFERENCES creator_leads(id) ON DELETE SET NULL,
+  shortcode TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  first BOOLEAN NOT NULL DEFAULT FALSE,
+  status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'pending', 'approved', 'rejected')),
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS creator_reels_chat_idx ON creator_reels(chat_id, submitted_at);
+CREATE INDEX IF NOT EXISTS creator_reels_status_idx ON creator_reels(status);
+CREATE TABLE IF NOT EXISTS creator_bot_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  support_username TEXT,
+  rules TEXT,
+  first_reel_note TEXT,
+  logo_file_id TEXT,
+  logo_kind TEXT CHECK (logo_kind IS NULL OR logo_kind IN ('photo', 'document')),
+  guide_file_id TEXT
 );
