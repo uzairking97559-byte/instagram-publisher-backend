@@ -33,8 +33,9 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
    and posts a morning report of the day before.
 3. **Creators** — **Joined**: creators who sent a WhatsApp number or Telegram ID in a DM
-   reply (picked out automatically, announced on Telegram) or were added by hand, with
-   status Naya → Baat hui → Logo bheja → Kaam shuru / Mana, notes and a copyable report.
+   reply (picked out automatically, announced on Telegram), old creators pasted in bulk, or
+   added by hand, with status Naya → Baat hui → Logo bheja → Kaam shuru / Mana, notes,
+   "Kaun laya" (who brought each page), a target with days left, and a copyable report.
    **Finder**: from seed creators, read each profile (followers, last post,
    average views) and Instagram's "Similar accounts" with a separate Instagram login, and
    keep a list to review and copy (nobody is messaged). **List check**: which usernames
@@ -115,11 +116,13 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
   profile without the owner.
 - Do not create Instagram accounts, solve captchas, bypass Instagram security checks, fake
   human activity, or help an account avoid being linked to suspended ones.
-- Current state (24 Oct 2026): the first DM account had an Instagram "Confirm you're human"
-  check (cleared by the owner) and its Browser Use login expired. DMs now go from a second,
-  older account in its own profile ("DM 2"), starting with a 5-DM test, ~20/day, 12-minute
-  gap, India proxy. Add more accounts one at a time, each after its own clean test. The
-  finder has not run yet; its first run is a 50-profile test.
+- Current state (25 Oct 2026): the first DM account's profile and the finder profile were
+  deleted by the owner. DMs go from an older account in profile "DM 1" (it passed a 5-DM
+  test; ~20/day, 12-minute gap, India proxy). A second account was logged in to a new
+  profile "DM 2" (Instagram asked for a check at login); it runs its own 5-DM test before
+  any daily sending, and stops for good on any further check. Add more accounts one at a
+  time, each after its own clean test. The finder needs a new profile before its first
+  50-profile test.
 
 ## Environment variables (names only — values are set in Render)
 

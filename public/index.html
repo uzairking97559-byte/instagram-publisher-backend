@@ -270,7 +270,24 @@
             <div><h2>Joined creators</h2><p class="muted">Jinhone DM mein apna WhatsApp number ya Telegram ID bheja, wo apne aap yahan aa jate hain (Telegram bot par alert bhi aata hai). Unse baat karo aur status badalte raho.</p></div>
             <button id="joined-reload" class="quiet small" type="button">Refresh</button>
           </div>
+          <section id="joined-target" class="job-card joined-target" aria-labelledby="joined-target-title" hidden>
+            <div class="job-head"><strong id="joined-target-title">Target</strong><span id="joined-target-days" class="badge"></span></div>
+            <p id="joined-target-line" class="job-meta"></p>
+            <progress id="joined-target-bar" class="progress-bar" max="50" value="0" aria-labelledby="joined-target-title"></progress>
+            <p id="joined-target-need" class="joined-target-need"></p>
+            <details class="batch-details">
+              <summary>Target badlo</summary>
+              <form id="joined-target-form" class="joined-target-form">
+                <label for="joined-target-count">Kitne creators kaam shuru karein</label>
+                <input id="joined-target-count" type="number" min="1" max="100000" step="1" value="50" required>
+                <label for="joined-target-date">Kab tak <span class="muted">(India time)</span></label>
+                <input id="joined-target-date" type="date">
+                <button id="joined-target-save" class="quiet strong small" type="submit">Target save karo</button>
+              </form>
+            </details>
+          </section>
           <div id="joined-counts" class="stats joined-counts"></div>
+          <div id="joined-referrers" class="job-card joined-referrers" hidden></div>
           <div id="joined-filter" class="reply-filter joined-filter" role="group" aria-label="Kis status ke creators dikhayein">
             <button type="button" class="reply-chip" data-status="all" aria-pressed="true">Sab</button>
             <button type="button" class="reply-chip" data-status="new" aria-pressed="false">Naye</button>
@@ -279,18 +296,35 @@
             <button type="button" class="reply-chip" data-status="working" aria-pressed="false">Kaam shuru</button>
             <button type="button" class="reply-chip" data-status="declined" aria-pressed="false">Mana</button>
           </div>
+          <p id="joined-by" class="hint" hidden></p>
           <div id="joined-list" class="jobs"></div>
           <div class="dm-actions"><button id="joined-copy" class="quiet" type="button">Report copy karo</button></div>
           <details id="joined-new" class="add-account">
             <summary><span class="plus" aria-hidden="true">+</span>Khud se creator daalo</summary>
             <form id="joined-form" class="dm-form">
-              <label for="joined-username">Instagram username</label>
-              <input id="joined-username" type="text" maxlength="80" required autocomplete="off" spellcheck="false" placeholder="@creator_name">
-              <label for="joined-phone">WhatsApp number <span class="muted">(agar hai)</span></label>
+              <label for="joined-username">Instagram username <span class="muted">(agar pata hai)</span></label>
+              <input id="joined-username" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="@creator_name">
+              <label for="joined-name">Naam</label>
+              <input id="joined-name" type="text" maxlength="80" autocomplete="off" placeholder="Rahul Memes">
+              <label for="joined-phone">WhatsApp number</label>
               <input id="joined-phone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="98765 43210">
               <label for="joined-telegram">Telegram ID <span class="muted">(agar hai)</span></label>
               <input id="joined-telegram" type="text" maxlength="60" autocomplete="off" spellcheck="false" placeholder="@telegram_id">
+              <label for="joined-referrer">Kaun laya <span class="muted">(manager ya creator, agar koi)</span></label>
+              <input id="joined-referrer" type="text" maxlength="60" autocomplete="off" placeholder="Jaise: Rahul agency">
+              <p class="hint">Username, number ya Telegram mein se kam se kam ek chahiye.</p>
               <button id="joined-save" class="primary" type="submit">Joined mein daalo</button>
+            </form>
+          </details>
+          <details id="joined-import" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Purane creators ek saath daalo</summary>
+            <form id="joined-import-form" class="dm-form">
+              <label for="joined-import-text">Ek line mein ek creator</label>
+              <textarea id="joined-import-text" rows="7" required spellcheck="false" autocomplete="off" placeholder="Rahul Memes 98765 43210&#10;@funny.page 91234 56789&#10;https://www.instagram.com/edits_hub/ 70123 45678"></textarea>
+              <p id="joined-import-count" class="hint">Naam aur number, ya Instagram link / @username. Ek baar mein 2,000 line tak. Jo pehle se list mein hain, wo dobara nahi judenge.</p>
+              <label for="joined-import-referrer">Kaun laya <span class="muted">(sab ke liye, agar koi)</span></label>
+              <input id="joined-import-referrer" type="text" maxlength="60" autocomplete="off" placeholder="Khaali chhod do agar aapke apne hain">
+              <button id="joined-import-save" class="primary" type="submit">List mein daalo</button>
             </form>
           </details>
           <div class="side-note"><strong>Kaise kaam karta hai.</strong><p>Taiyaar jawab mein likho: “Apna WhatsApp number ya Telegram ID bhejo”. Jo bhejega, wo yahan aa jayega. Number na pakda gaya ho to Replies mein us reply par “Joined mein daalo” dabao. Telegram channel ka invite link sirf inhi ko bhejo.</p></div>

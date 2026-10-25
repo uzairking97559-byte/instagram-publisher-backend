@@ -1071,7 +1071,7 @@ $("logout").addEventListener("click", async () => {
     frameSettings.clear(); frameEditors.clear(); captionEditors.clear(); renderAccounts(); renderJobs();
     dmState = null; checkState = null; replyState = null; dmProfilesLoaded = false; dmOpen.clear(); dmTargets.clear(); replyDrafts.clear();
     finderState = null; finderProfilesLoaded = false; finderOpen.clear(); finderFilter.clear(); finderResults.clear();
-    dmStats = null; leadState = null; leadFilter = "all";
+    dmStats = null; leadState = null; leadFilter = "all"; leadReferrer = "";
     renderDm(); renderLeads(); renderChecks(); renderFinder(); renderReplies(); currentView = null;
     $("publish-form").reset(); await boot();
   } catch (error) { explain(error); }
@@ -2427,30 +2427,79 @@ $("finder-form").addEventListener("submit", async (event) => {
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });
-// ---- Joined: creators who sent a WhatsApp number or Telegram ID ----
+// ---- Joined: creators who sent a WhatsApp number or Telegram ID, old creators, referrals, target ----
 Object.assign(messages, {
-  invalid_lead: "Sahi Instagram username daalo. WhatsApp number 10 digit ka (6–9 se shuru) aur Telegram ID 5–32 akshar ki honi chahiye.",
-  lead_not_found: "Ye creator list mein nahi mila. Refresh karo."
+  invalid_lead: "Instagram username, WhatsApp number (10 digit, 6–9 se shuru) ya Telegram ID (5–32 akshar) mein se kam se kam ek sahi daalo.",
+  lead_not_found: "Ye creator list mein nahi mila. Refresh karo.",
+  lead_exists: "Ye Instagram username pehle se Joined list mein hai.",
+  invalid_import: "Kam se kam ek line daalo: naam aur number, ya Instagram link / @username.",
+  too_many_leads: "Ek baar mein 2,000 line tak daalo. Baaki agli baar.",
+  invalid_target: "Target 1 se 100000 ke beech rakho, aur sahi date chuno."
 });
 const LEAD_STATUSES = [["new", "Naya"], ["talking", "Baat hui"], ["logo_sent", "Logo bheja"], ["working", "Kaam shuru"], ["declined", "Mana"]];
 const LEAD_LABELS = Object.fromEntries(LEAD_STATUSES);
+// A manager or creator gets ₹200 for each page they brought, at that page's first payment.
+const REFERRAL_INR = 200;
 let leadState = null;
 let leadFilter = "all";
+let leadReferrer = "";
 async function loadLeads() {
-  leadState = await api("/api/leads");
+  leadState = await api(`/api/leads${leadReferrer ? `?referrer=${encodeURIComponent(leadReferrer)}` : ""}`);
   renderLeads();
 }
 // 98765 43210
 function phoneText(phone) { return `${phone.slice(0, 5)} ${phone.slice(5)}`; }
+function leadLabel(lead) { return lead.username ? `@${lead.username}` : lead.name || (lead.phone ? phoneText(lead.phone) : lead.telegram ? `@${lead.telegram}` : "Creator"); }
+function dayText(date) { return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }); }
 function leadLink(text, href, className = "quiet small") {
   const link = element("a", text, className);
   link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer";
   return link;
 }
+function renderLeadTarget() {
+  const goal = leadState?.target;
+  $("joined-target").hidden = !goal;
+  if (!goal) return;
+  $("joined-target-title").textContent = `Target: ${goal.target} creators kaam shuru karein`;
+  const days = $("joined-target-days");
+  days.hidden = false;
+  if (!goal.deadline) { days.textContent = "Date set nahi"; days.className = "badge"; }
+  else if (goal.days_left > 0) { days.textContent = `${goal.days_left} din baaki`; days.className = `badge ${goal.days_left <= 2 && goal.remaining ? "failed" : "new"}`; }
+  else { days.textContent = "Time khatam"; days.className = "badge failed"; }
+  $("joined-target-line").textContent = [`${goal.working} ne kaam shuru kiya`, `${goal.logo_sent} ko logo bheja`,
+    goal.deadline ? `${dayText(goal.deadline)} tak` : null].filter(Boolean).join(" · ");
+  $("joined-target-bar").max = goal.target;
+  $("joined-target-bar").value = Math.min(goal.working, goal.target);
+  $("joined-target-need").textContent = !goal.remaining ? "Target poora ho gaya."
+    : goal.per_day ? `${goal.remaining} aur chahiye: roz ~${goal.per_day} creators ka kaam shuru karwana hoga.`
+    : goal.deadline ? `${goal.remaining} aur chahiye.` : `${goal.remaining} aur chahiye. Date daalo to roz ka hisaab dikhega.`;
+  const focused = $("joined-target-form").contains(document.activeElement);
+  if (!focused) { $("joined-target-count").value = String(goal.target); $("joined-target-date").value = goal.deadline || ""; }
+}
+function renderReferrers() {
+  const box = $("joined-referrers");
+  const rows = leadState?.referrers || [];
+  box.hidden = !rows.length;
+  box.replaceChildren();
+  if (!rows.length) return;
+  const head = element("div", undefined, "job-head");
+  head.append(element("strong", "Kaun laya"));
+  box.append(head, element("p", `Har page ka ₹${REFERRAL_INR}, us page ki pehli payment par. Naam dabao to sirf uske pages dikhenge.`, "job-meta"));
+  for (const row of rows) {
+    const line = element("div", undefined, "dm-target");
+    const who = element("button", row.name, "link-button referrer-name"); who.type = "button";
+    who.addEventListener("click", () => { leadReferrer = row.name; leadFilter = "all"; loadLeads().catch(explain); });
+    const right = element("span", `${row.pages} pages · ${row.working} kaam shuru · ₹${(row.working * REFERRAL_INR).toLocaleString("en-IN")}`, "stat-right");
+    line.append(who, right);
+    box.append(line);
+  }
+}
 function renderLeads() {
   const counts = leadState?.counts;
   $("joined-tab-count").hidden = !counts?.new;
   $("joined-tab-count").textContent = counts?.new ? String(counts.new) : "";
+  renderLeadTarget();
+  renderReferrers();
   const box = $("joined-counts");
   box.replaceChildren();
   if (counts) {
@@ -2467,6 +2516,14 @@ function renderLeads() {
     const label = key === "all" ? "Sab" : LEAD_LABELS[key];
     chip.textContent = counts && key !== "all" && counts[key] ? `${label} (${counts[key]})` : label;
   }
+  const by = $("joined-by");
+  by.hidden = !leadReferrer;
+  by.replaceChildren();
+  if (leadReferrer) {
+    const all = element("button", "Sab dikhao", "link-button"); all.type = "button";
+    all.addEventListener("click", () => { leadReferrer = ""; loadLeads().catch(explain); });
+    by.append(element("span", `Sirf ${leadReferrer} ke laaye pages. `), all);
+  }
   $("joined-copy").hidden = !counts?.total;
   const list = $("joined-list");
   list.replaceChildren();
@@ -2474,17 +2531,19 @@ function renderLeads() {
   const shown = leadState.leads.filter((lead) => leadFilter === "all" || lead.status === leadFilter);
   if (!shown.length) {
     list.append(element("p", counts.total ? "Is status mein abhi koi creator nahi."
-      : "Abhi koi nahi. Jab koi creator DM mein WhatsApp number ya Telegram ID bhejega, wo yahan aa jayega.", "empty"));
+      : "Abhi koi nahi. Jab koi creator DM mein WhatsApp number ya Telegram ID bhejega, wo yahan aa jayega. Purane creators neeche se ek saath daal sakte ho.", "empty"));
   }
   for (const lead of shown) list.append(leadCard(lead));
 }
 function leadCard(lead) {
   const card = element("article", undefined, `job-card lead-card${lead.status === "new" ? " fresh" : ""}`);
   const head = element("div", undefined, "job-head");
-  head.append(leadLink(`@${lead.username}`, `https://www.instagram.com/${encodeURIComponent(lead.username)}/`, "lead-name"),
+  head.append(lead.username ? leadLink(`@${lead.username}`, `https://www.instagram.com/${encodeURIComponent(lead.username)}/`, "lead-name")
+    : element("strong", leadLabel(lead), "lead-name"),
     element("span", LEAD_LABELS[lead.status] || lead.status, `badge lead-${lead.status}`));
   card.append(head);
-  const meta = [lead.name, lead.account ? `@${lead.account} se` : lead.source === "manual" ? "khud daala" : null, formatWhen(lead.created_at)].filter(Boolean);
+  const source = lead.account ? `@${lead.account} se` : lead.source === "manual" ? "khud daala" : lead.source === "import" ? "purana creator" : null;
+  const meta = [lead.username ? lead.name : null, source, lead.referrer ? `Laya: ${lead.referrer}` : null, formatWhen(lead.created_at)].filter(Boolean);
   card.append(element("p", meta.join(" · "), "job-meta"));
   const contact = element("div", undefined, "dm-actions lead-contact");
   if (lead.phone) contact.append(leadLink(`WhatsApp ${phoneText(lead.phone)} ↗`, `https://wa.me/91${lead.phone}`, "quiet small strong"));
@@ -2501,7 +2560,7 @@ function leadCard(lead) {
   const actions = element("div", undefined, "dm-actions");
   const select = document.createElement("select");
   select.className = "lead-status";
-  select.setAttribute("aria-label", `@${lead.username} ka status`);
+  select.setAttribute("aria-label", `${leadLabel(lead)} ka status`);
   for (const [value, label] of LEAD_STATUSES) {
     const option = element("option", label); option.value = value; select.append(option);
   }
@@ -2515,7 +2574,7 @@ function leadCard(lead) {
 
   const edit = document.createElement("details");
   edit.className = "batch-details";
-  edit.append(element("summary", "Badlo: number, Telegram, note"));
+  edit.append(element("summary", "Badlo: username, number, Telegram, kaun laya, note"));
   const form = element("form", undefined, "dm-form");
   const field = (label, value, type, max) => {
     const wrap = element("label", label);
@@ -2525,14 +2584,17 @@ function leadCard(lead) {
     form.append(wrap);
     return input;
   };
+  const username = field("Instagram username", lead.username ? `@${lead.username}` : "", "text", 80);
+  const name = field("Naam", lead.name, "text", 80);
   const phone = field("WhatsApp number", lead.phone, "tel", 20);
   const telegram = field("Telegram ID", lead.telegram ? `@${lead.telegram}` : "", "text", 60);
+  const referrer = field("Kaun laya", lead.referrer, "text", 60);
   const note = field("Note (jaise: logo bheja, 2 Reels)", lead.note, "text", 300);
   const row = element("div", undefined, "dm-actions");
   const ok = element("button", "Save", "quiet strong small"); ok.type = "submit";
   const remove = element("button", "List se hatao", "quiet small danger"); remove.type = "button";
   remove.addEventListener("click", async () => {
-    if (!confirm(`@${lead.username} ko Joined list se hatana hai?`)) return;
+    if (!confirm(`${leadLabel(lead)} ko Joined list se hatana hai?`)) return;
     remove.disabled = true;
     try { leadState = await api(`/api/leads/${encodeURIComponent(lead.id)}`, { method: "DELETE" }); renderLeads(); }
     catch (error) { explain(error); remove.disabled = false; }
@@ -2541,20 +2603,21 @@ function leadCard(lead) {
   form.append(row);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (await save({ phone: phone.value.trim(), telegram: telegram.value.trim(), note: note.value }, ok)) notice(`@${lead.username} save ho gaya.`);
+    if (await save({ username: username.value.trim(), name: name.value, phone: phone.value.trim(), telegram: telegram.value.trim(),
+      referrer: referrer.value, note: note.value }, ok)) notice(`${leadLabel(lead)} save ho gaya.`);
   });
   edit.append(form);
   card.append(edit);
   return card;
 }
-// A short report for the brand: how many joined, talking and working.
+// A short report for the brand: the target, and who is working.
 function leadReport() {
-  const { counts, leads } = leadState;
-  const working = leads.filter((lead) => lead.status === "working").map((lead) => `@${lead.username}`);
-  const lines = [`Creators update (${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })})`,
-    `Joined: ${counts.total} (aaj ${counts.today} naye)`, `Baat chal rahi: ${counts.new + counts.talking}`, `Logo bheja: ${counts.logo_sent}`,
-    `Kaam shuru: ${counts.working}`];
-  if (working.length) lines.push("", "Kaam shuru karne wale:", ...working.slice(0, 50));
+  const { counts, leads, target } = leadState;
+  const working = leads.filter((lead) => lead.status === "working").map(leadLabel);
+  const lines = [`Creators update (${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })})`];
+  if (target) lines.push(`Kaam shuru: ${target.working}/${target.target}${target.deadline ? ` (${dayText(target.deadline)} tak)` : ""}`);
+  lines.push(`Joined: ${counts.total} (aaj ${counts.today} naye)`, `Baat chal rahi: ${counts.new + counts.talking}`, `Logo bheja: ${counts.logo_sent}`);
+  if (working.length) lines.push("", "Kaam shuru karne wale:", ...working.slice(0, 100));
   return lines.join("\n");
 }
 for (const chip of document.querySelectorAll("#joined-filter .reply-chip")) {
@@ -2571,11 +2634,50 @@ $("joined-form").addEventListener("submit", async (event) => {
   const button = $("joined-save"); button.disabled = true;
   try {
     leadState = await api("/api/leads", { method: "POST", body: JSON.stringify({
-      username: $("joined-username").value.trim(), phone: $("joined-phone").value.trim(), telegram: $("joined-telegram").value.trim() }) });
-    $("joined-username").value = ""; $("joined-phone").value = ""; $("joined-telegram").value = ""; $("joined-new").open = false;
-    leadFilter = "all";
+      username: $("joined-username").value.trim(), name: $("joined-name").value, phone: $("joined-phone").value.trim(),
+      telegram: $("joined-telegram").value.trim(), referrer: $("joined-referrer").value }) });
+    for (const id of ["joined-username", "joined-name", "joined-phone", "joined-telegram"]) $(id).value = "";
+    $("joined-new").open = false;
+    leadFilter = "all"; leadReferrer = "";
     renderLeads();
     notice("Creator Joined list mein aa gaya.");
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+function updateImportCount() {
+  const lines = $("joined-import-text").value.split(/\r?\n/).filter((line) => line.trim()).length;
+  $("joined-import-count").textContent = lines
+    ? `${lines} line. Jo pehle se list mein hain, wo dobara nahi judenge.`
+    : "Naam aur number, ya Instagram link / @username. Ek baar mein 2,000 line tak. Jo pehle se list mein hain, wo dobara nahi judenge.";
+}
+$("joined-import-text").addEventListener("input", updateImportCount);
+$("joined-import-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("joined-import-save"); button.disabled = true;
+  try {
+    const data = await api("/api/leads/import", { method: "POST", body: JSON.stringify({
+      text: $("joined-import-text").value, referrer: $("joined-import-referrer").value }) });
+    leadState = data;
+    leadFilter = "all"; leadReferrer = "";
+    $("joined-import-text").value = ""; updateImportCount();
+    $("joined-import").open = false;
+    renderLeads();
+    const parts = [`${data.added} naye jude`];
+    if (data.updated) parts.push(`${data.updated} purano mein number/naam bhara`);
+    if (data.same) parts.push(`${data.same} pehle se the`);
+    if (data.invalid.length) parts.push(`${data.invalid.length}${data.invalid_more ? "+" : ""} line samajh nahi aayi: ${data.invalid.slice(0, 3).join(" | ")}`);
+    notice(parts.join(" · ") + ".");
+  } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+$("joined-target-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("joined-target-save"); button.disabled = true;
+  try {
+    leadState = await api("/api/leads/target", { method: "PUT", body: JSON.stringify({
+      target: Number($("joined-target-count").value), deadline: $("joined-target-date").value || null }) });
+    renderLeads();
+    notice("Target save ho gaya.");
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });

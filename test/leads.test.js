@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { harness, json } = require("./helpers");
-const { extractContact } = require("../lib/leads");
+const { extractContact, parseImportLine } = require("../lib/leads");
 
 const TOKEN = "1234567890:AAH-test_only_token_for_the_bot_0123456";
 const SECRET = crypto.createHmac("sha256", TOKEN).update("telegram-webhook").digest("hex").slice(0, 48);
@@ -35,6 +35,19 @@ test("a WhatsApp number or Telegram ID is picked out of a reply", () => {
     ["@abc", { phone: null, telegram: null }]
   ];
   for (const [text, expected] of cases) assert.deepEqual(extractContact(text), expected, text);
+});
+
+test("a pasted line of an old creator gives a name, a number, an Instagram page or a Telegram ID", () => {
+  const cases = [
+    ["Rahul Memes 98765 43210", { username: null, phone: "9876543210", telegram: null, name: "Rahul Memes" }],
+    ["+91 70123-45678, Sana edits", { username: null, phone: "7012345678", telegram: null, name: "Sana edits" }],
+    ["@Funny.Page 91234 56789", { username: "funny.page", phone: "9123456789", telegram: null, name: null }],
+    ["https://www.instagram.com/edits_hub/?igsh=abc 70123 45678", { username: "edits_hub", phone: "7012345678", telegram: null, name: null }],
+    ["Aman | 9988776655 | t.me/aman_memes", { username: null, phone: "9988776655", telegram: "aman_memes", name: "Aman" }],
+    ["@meme.wala", { username: "meme.wala", phone: null, telegram: null, name: null }],
+    ["Naam, Number", { username: null, phone: null, telegram: null, name: "Naam Number" }]
+  ];
+  for (const [line, expected] of cases) assert.deepEqual(parseImportLine(line), expected, line);
 });
 
 function fakes() {
@@ -154,4 +167,54 @@ test("joined: a number or Telegram ID in a DM reply makes a lead, with an alert;
   await h.app.locals.runTelegram();
   const report = fake.sent.find((message) => message.text.startsWith("📅"));
   assert.match(report.text, /📇 Joined: kal 2 naye · 2 se baat chal rahi · 0 ne kaam shuru kiya/);
+});
+
+test("joined: old creators imported in one go, who brought whom, and the target", async (t) => {
+  const clock = { now: new Date(NOON_IST) };
+  const h = await harness(t, { env: { BROWSER_USE_API_KEY: "test-browser-use-key" }, dmOptions: { now: () => clock.now, intervalMs: 0 } });
+  const cookie = await h.login();
+  const get = async (query = "") => (await h.request(`/api/leads${query}`, { cookie })).data;
+  const imp = (text, referrer) => h.request("/api/leads/import", { method: "POST", cookie, body: { text, referrer } });
+
+  // Nothing set yet: target 50, no date.
+  let data = await get();
+  assert.deepEqual(data.target, { target: 50, deadline: null, saved: false, working: 0, logo_sent: 0, remaining: 50, days_left: null, per_day: null });
+  assert.deepEqual(data.referrers, []);
+
+  assert.equal((await imp("   \n ")).data.error, "invalid_import");
+  assert.equal((await imp(Array.from({ length: 2001 }, (_, i) => `x ${i}`).join("\n"))).data.error, "too_many_leads");
+  let result = (await imp("Rahul Memes 98765 43210\n@funny.page 91234 56789\nheader line\nRahul again 98765 43210\n@funny.page")).data;
+  assert.deepEqual([result.added, result.updated, result.same, result.invalid], [2, 0, 2, ["header line"]]);
+  assert.deepEqual(result.leads.map(({ username, name, phone, source, status }) => ({ username, name, phone, source, status })), [
+    { username: "funny.page", name: null, phone: "9123456789", source: "import", status: "new" },
+    { username: null, name: "Rahul Memes", phone: "9876543210", source: "import", status: "new" }]);
+
+  // A second paste completes the ones already there and adds the rest, all brought by one manager.
+  result = (await imp("@rahul.memes 98765 43210\nSana 70123 45678", "Ali Agency")).data;
+  assert.deepEqual([result.added, result.updated, result.same], [1, 1, 0]);
+  data = await get();
+  const rahul = data.leads.find((lead) => lead.phone === "9876543210");
+  assert.deepEqual([rahul.username, rahul.name, rahul.referrer], ["rahul.memes", "Rahul Memes", "Ali Agency"], "gaps filled, old values kept");
+
+  // By hand: a number alone is enough; a referrer typed in another case groups with the same one.
+  assert.equal((await h.request("/api/leads", { method: "POST", cookie, body: { name: "Only a name" } })).data.error, "invalid_lead");
+  const added = await h.request("/api/leads", { method: "POST", cookie, body: { name: "Kiran", phone: "99887 76655", referrer: "ali agency" } });
+  assert.equal(added.status, 201);
+  const kiran = added.data.leads.find((lead) => lead.name === "Kiran");
+  assert.equal(kiran.source, "manual");
+  const sana = added.data.leads.find((lead) => lead.name === "Sana");
+  assert.equal((await h.request(`/api/leads/${sana.id}`, { method: "PUT", cookie, body: { username: "@funny.page" } })).data.error, "lead_exists");
+  await h.request(`/api/leads/${sana.id}`, { method: "PUT", cookie, body: { status: "working", username: "sana.edits" } });
+  await h.request(`/api/leads/${kiran.id}`, { method: "PUT", cookie, body: { status: "logo_sent" } });
+  data = await get();
+  assert.deepEqual(data.referrers, [{ name: "Ali Agency", pages: 3, working: 1 }]);
+  assert.deepEqual((await get("?referrer=ALI%20AGENCY")).leads.map((lead) => lead.username || lead.name).sort(), ["Kiran", "rahul.memes", "sana.edits"]);
+
+  // The target: 3 working by Friday 23 Oct, set on Sunday 18 Oct (India time) = 6 days left.
+  assert.equal((await h.request("/api/leads/target", { method: "PUT", cookie, body: { target: 0 } })).data.error, "invalid_target");
+  assert.equal((await h.request("/api/leads/target", { method: "PUT", cookie, body: { target: 3, deadline: "2026-02-30" } })).data.error, "invalid_target");
+  data = (await h.request("/api/leads/target", { method: "PUT", cookie, body: { target: 3, deadline: "2026-10-23" } })).data;
+  assert.deepEqual(data.target, { target: 3, deadline: "2026-10-23", saved: true, working: 1, logo_sent: 1, remaining: 2, days_left: 6, per_day: 1 });
+  clock.now = new Date("2026-10-24T06:30:00.000Z");
+  assert.deepEqual([(await get()).target.days_left, (await get()).target.per_day], [0, null]);
 });

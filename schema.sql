@@ -458,3 +458,15 @@ CREATE TABLE IF NOT EXISTS creator_leads (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS creator_leads_created_idx ON creator_leads(created_at);
+-- Joined: imported old creators may have only a name and a number; who brought
+-- each one ("kaun laya"); and the target the owner is working towards.
+ALTER TABLE creator_leads ALTER COLUMN username DROP NOT NULL;
+ALTER TABLE creator_leads ADD COLUMN IF NOT EXISTS referrer TEXT;
+ALTER TABLE creator_leads DROP CONSTRAINT IF EXISTS creator_leads_source_check;
+ALTER TABLE creator_leads ADD CONSTRAINT creator_leads_source_check CHECK (source IN ('dm', 'manual', 'import'));
+CREATE INDEX IF NOT EXISTS creator_leads_phone_idx ON creator_leads(phone);
+CREATE TABLE IF NOT EXISTS lead_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  target INTEGER NOT NULL DEFAULT 50 CHECK (target BETWEEN 1 AND 100000),
+  deadline DATE
+);
