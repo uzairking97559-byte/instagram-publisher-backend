@@ -286,6 +286,25 @@
               </form>
             </details>
           </section>
+          <section id="wwm" class="job-card wwm-card" aria-labelledby="wwm-title" hidden>
+            <div class="job-head"><strong id="wwm-title">Workwithme bot</strong><span id="wwm-state" class="badge"></span></div>
+            <p id="wwm-line" class="job-meta"></p>
+            <div id="wwm-pending"></div>
+            <details id="wwm-settings" class="batch-details">
+              <summary>Bot settings: support, rules, logo, video</summary>
+              <form id="wwm-form" class="dm-form">
+                <label for="wwm-support">Support ka Telegram username <span class="muted">(Support dabane par creator yahan pahunchega)</span></label>
+                <input id="wwm-support" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="@aapka_username">
+                <label for="wwm-rules">Deal ke rules <span class="muted">(logo kahan, kitna bada, kitni der)</span></label>
+                <textarea id="wwm-rules" rows="4" maxlength="1500" placeholder="Jaise: Logo Reel ke upar right corner mein, poori Reel mein dikhna chahiye."></textarea>
+                <label for="wwm-note">Pehli Reel ke saath ek baar <span class="muted">(bio link ya hashtag, agar brand chahta hai)</span></label>
+                <textarea id="wwm-note" rows="2" maxlength="1500" placeholder="Jaise: Caption mein #brandname likhna hai."></textarea>
+                <p class="hint">Logo aur guide video: apne Telegram se bot ko bhejo. Logo ki photo ya PNG file ke caption mein <strong>/logo</strong> likho, video ke caption mein <strong>/video</strong>.</p>
+                <p id="wwm-files" class="hint"></p>
+                <button id="wwm-save" class="quiet strong small" type="submit">Settings save karo</button>
+              </form>
+            </details>
+          </section>
           <div id="joined-counts" class="stats joined-counts"></div>
           <div id="joined-referrers" class="job-card joined-referrers" hidden></div>
           <div id="joined-filter" class="reply-filter joined-filter" role="group" aria-label="Kis status ke creators dikhayein">

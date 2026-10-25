@@ -758,3 +758,10 @@ footer a { color: var(--marigold-text); }
 .referrer-name { padding: 0; font-weight: 600; text-align: left; }
 #joined-by { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 #joined-by .link-button { padding: 0; }
+
+/* Workwithme bot card */
+.wwm-card { margin-bottom: 14px; }
+.job-card p.wwm-pending-title { margin-top: 12px; color: var(--chalk); font-weight: 600; }
+.wwm-row { flex-wrap: wrap; }
+.wwm-row small { color: var(--haze); }
+.wwm-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

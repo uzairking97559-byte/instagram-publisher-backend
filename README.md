@@ -99,6 +99,18 @@ With `TELEGRAM_BOT_TOKEN` (and optionally `TELEGRAM_BOT_USERNAME`) set, the Repl
 
 **Purane creators ek saath daalo** takes a pasted list from the phone, one creator per line in any order: a name and a number, an Instagram link or `@username` (`@name` means the Instagram page here), and optionally a `t.me` link; up to 2,000 lines. A creator already listed (same username, else same number) is only completed, never duplicated. Every entry can carry **Kaun laya** (the manager or creator who brought it); the Kaun laya panel counts pages and working pages per name (case does not matter) with the referral amount due at each page's first payment, and tapping a name shows only their pages. The **Target** box (default 50, with an optional date) shows how many have started work, days left in India time and how many a day are still needed; the morning Telegram report adds the target once it is set.
 
+## Workwithme bot (creators)
+
+With `WORKWITHME_BOT_TOKEN` set (and optionally `WORKWITHME_BOT_USERNAME`), a second Telegram bot talks to creators (`lib/creator-bot.js`, webhook `/telegram/workwithme`, checked with a secret header derived from its token). Every message reads as the bot's own.
+
+1. **Start** shows the offer and a menu (Kaam shuru karo, Payment kab?, Rules, Manager bano, Support). Support opens the owner's Telegram username set on the website. A guide video, if set, is sent first.
+2. **Kaam shuru karo** asks for the Instagram profile link (a link, not a username). The page is matched with Creators → Joined or added there (source `bot`, status Logo bheja, Telegram username, and the manager as Kaun laya when the creator came through a manager's link). A page already tied to another Telegram account is refused. The creator then gets the logo, the rules and, once, the note for the first Reel (bio link or hashtag).
+3. **The first Reel's link** goes to the owner's own bot with **Approve** / **Reject** (also on the website, Creators → Joined → Workwithme bot). Approval sets the page to Kaam shuru and asks for a UPI ID for the advance; rejection asks for a new Reel.
+4. After approval every Reel link is taken (reel, reels, p or tv links), each link once by anyone, with no daily limit; the creator sees today's, this week's (from Monday, India time) and total count. A UPI ID sent later replaces the old one.
+5. **Manager bano** gives a link `t.me/<bot>?start=m_<code>`; pages that join through it carry the manager's name and code as Kaun laya, and the manager sees how many of his pages joined and started.
+
+The owner's Telegram account (the chat linked to his own bot) sends the bot the logo (a photo or file with caption `/logo`) and the guide video (caption `/video`). The website card shows the bot's state, counts, first Reels waiting for approval, and the support username, rules and first-Reel note.
+
 ## Creator finder
 
 **Creators → Finder** finds new creators without messaging anyone. A search has seed usernames (up to 50), follower range, how recent the last post must be, how deep to follow "Similar accounts" (1–3 levels), a daily limit (10–300), a gap between profiles (30–600 s, ±30%), hours (India time), proxy and warm-up. It reads each profile through Instagram's web JSON inside one open Instagram page (`lib/instagram-finder.js`: followers, following, posts, private, category, bio, newest post, average views, similar accounts), falling back to the profile page and its Similar accounts button. Seeds and profiles that fit are followed one level deeper; the queue reads the most-mentioned accounts first. A profile read by any search in the last 14 days is copied instead of read again.
@@ -153,6 +165,7 @@ All account/job routes require the owner session cookie. All writes require an e
 | `GET`/`POST /api/dm/templates`, `DELETE /api/dm/templates/:id` | Saved answers |
 | `GET /api/telegram`, `POST /api/telegram/link`, `DELETE /api/telegram`; `POST /telegram/webhook` | Telegram bot status, one-time link, unlink; Telegram's webhook (secret header, no session) |
 | `GET /api/leads[?status=&referrer=]`, `POST /api/leads`, `PUT`/`DELETE /api/leads/:id` | Joined creators with counts, the Kaun laya summary and the target; add (`username`, `name`, `phone`, `telegram`, `referrer`, or `reply_id` from a reply; at least a username, number or Telegram ID); change `status` (new/talking/logo_sent/working/declined), `username`, `name`, `phone`, `telegram`, `referrer`, `note`; remove |
+| `GET`/`PUT /api/creator-bot`, `POST /api/creator-bot/reels/:id/review`; `POST /telegram/workwithme` | Workwithme bot: state, counts, first Reels waiting; save `support_username`, `rules`, `first_reel_note`; approve or reject a first Reel (`approve: true/false`); Telegram's webhook (secret header, no session) |
 | `POST /api/leads/import`, `PUT /api/leads/target` | Paste old creators (`text`, one per line, optional `referrer`); set the target (`target`, optional `deadline` YYYY-MM-DD) |
 | `GET`/`POST /api/finder`, `GET`/`PUT`/`DELETE /api/finder/:id[?filter=]`, `POST .../seeds\|start\|pause\|review`, `GET .../usernames` | Creator finder: searches, results (match/approved/rejected/other/queue/missing/all), seeds, start (optional `stop_after`), pause, ✓/✕, usernames to copy |
 
