@@ -178,7 +178,7 @@ test("a profile renamed in Browser Use shows its new name on saved campaigns", a
   assert.equal(created.data.campaign.profile_name, "DM 2");
   const first = await h.request("/api/dm/profiles", { cookie });
   assert.equal(first.data.renamed, 1);
-  assert.equal((await campaign(created.data.campaign.id)).profile_name, "Personal Profile");
+  assert.equal((await campaign(created.data.campaign.id)).campaign.profile_name, "Personal Profile");
   assert.equal((await h.request("/api/dm/profiles", { cookie })).data.renamed, 0, "nothing left to rename");
 });
 
