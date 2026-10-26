@@ -222,3 +222,28 @@ test("the finder and the DM sender never share an Instagram login", async (t) =>
     daily_limit: 20, gap_minutes: 9, start_hour: 9, end_hour: 23, proxy: "in", requested_contact: true });
   assert.equal((await call(`/api/dm/campaigns/${other.data.campaign.id}/start`, "POST", {})).data.error, "profile_is_finder");
 });
+
+test("the finder can run on its own Browser Use account (FINDER_BROWSER_USE_API_KEY)", async (t) => {
+  const OWN = "test-finder-own-key";
+  const seen = [];
+  const run = async (url, init = {}) => {
+    const key = init.headers?.["X-Browser-Use-API-Key"];
+    seen.push(`${key} ${url.pathname}`);
+    if (url.pathname === "/api/v4/profiles") {
+      if (key === KEY) return json({ items: [{ id: DM_PROFILE, name: "DM 1", lastUsedAt: null }] });
+      if (key === OWN) return json({ items: [{ id: FINDER, name: "Dost finder", lastUsedAt: null }] });
+    }
+    return json({ detail: "invalid key" }, 401);
+  };
+  const h = await harness(t, { env: { BROWSER_USE_API_KEY: KEY, FINDER_BROWSER_USE_API_KEY: OWN }, meta: run, finderOptions: { intervalMs: 0 } });
+  const cookie = await h.login();
+  assert.equal((await h.request("/api/finder", { cookie })).data.own_account, true);
+  assert.deepEqual((await h.request("/api/finder/profiles", { cookie })).data.profiles.map((item) => item.name), ["Dost finder"]);
+  assert.deepEqual((await h.request("/api/dm/profiles", { cookie })).data.profiles.map((item) => item.name), ["DM 1"], "DMs keep the main account");
+  assert.deepEqual(seen, [`${OWN} /api/v4/profiles`, `${KEY} /api/v4/profiles`]);
+
+  const plain = await harness(t, { env: { BROWSER_USE_API_KEY: KEY }, meta: run, finderOptions: { intervalMs: 0 } });
+  const cookie2 = await plain.login();
+  assert.equal((await plain.request("/api/finder", { cookie: cookie2 })).data.own_account, false);
+  assert.deepEqual((await plain.request("/api/finder/profiles", { cookie: cookie2 })).data.profiles.map((item) => item.name), ["DM 1"]);
+});
