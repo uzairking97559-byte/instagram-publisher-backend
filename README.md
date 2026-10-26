@@ -154,7 +154,7 @@ All account/job routes require the owner session cookie. All writes require an e
 | `GET /api/jobs` | Latest 500 receipts, including batch progress; `?connection_id=` limits them to one account |
 | `POST /api/jobs/:jobId/publish` | Check and finish an existing request, or recover status |
 | `GET /api/dm` | DM Sender status (key set or not) and every campaign with counts and cost |
-| `GET /api/dm/profiles` | Browser Use profiles to send from |
+| `GET /api/dm/profiles` | Browser Use profiles to send from; a profile renamed in Browser Use also gets its new name on saved campaigns and finder runs (`renamed` counts them) |
 | `POST /api/dm/campaigns` | Create a campaign (paused) from settings and pasted usernames; needs `requested_contact: true` |
 | `GET`/`PUT`/`DELETE /api/dm/campaigns/:id` | A campaign with its list; change settings or delete while it is not running |
 | `POST /api/dm/campaigns/:id/targets` | Add usernames to a campaign |

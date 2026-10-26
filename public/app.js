@@ -1309,6 +1309,7 @@ async function loadDm() {
   renderDm();
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && currentView === "dm-create") void loadDmProfiles();
+  if (dmState.configured && dmState.campaigns.length) void dmProfilesOnce().catch(() => {});
   void loadChecks().catch(() => {});
   void loadDmStats().catch(() => {});
   void loadFinder().catch(() => {});
@@ -1496,10 +1497,15 @@ function renderDmDetail(body, campaign, targets) {
   body.append(addLabel, add, addButtons);
   if (campaign.status !== "running") body.append(dmSettingsEditor(campaign));
 }
-// Browser Use profiles, fetched once for the campaign editors.
+// Browser Use profiles, fetched once per page load for the campaign editors.
+// The server also copies new profile names onto campaigns; if any changed,
+// the lists are loaded again so cards show the name from Browser Use.
 let dmProfileList = null;
 function dmProfilesOnce() {
-  dmProfileList ||= api("/api/dm/profiles").then((data) => data.profiles).catch((error) => { dmProfileList = null; throw error; });
+  dmProfileList ||= api("/api/dm/profiles").then((data) => {
+    if (data.renamed) void loadDm().catch(() => {});
+    return data.profiles;
+  }).catch((error) => { dmProfileList = null; throw error; });
   return dmProfileList;
 }
 // The campaign's account, plus every other Browser Use profile (a finder's is shown but can't be picked).

@@ -172,6 +172,16 @@ test("a campaign saves its list once, without duplicates, and only for people wh
   assert.equal(tooMany.data.error, "too_many_usernames");
 });
 
+test("a profile renamed in Browser Use shows its new name on saved campaigns", async (t) => {
+  const { h, cookie, create, campaign } = await setup(t);
+  const created = await create({ profile_name: "DM 2" });
+  assert.equal(created.data.campaign.profile_name, "DM 2");
+  const first = await h.request("/api/dm/profiles", { cookie });
+  assert.equal(first.data.renamed, 1);
+  assert.equal((await campaign(created.data.campaign.id)).campaign.profile_name, "Personal Profile");
+  assert.equal((await h.request("/api/dm/profiles", { cookie })).data.renamed, 0, "nothing left to rename");
+});
+
 test("the worker sends one message per gap, stops after a test run and reports the cost", async (t) => {
   const { h, fake, driver, cookie, advance, create, campaign, start, tick } = await setup(t, {
     results: { two: { status: "skipped", reason: "already_in_thread" } }
