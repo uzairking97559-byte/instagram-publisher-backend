@@ -2114,7 +2114,7 @@ Object.assign(messages, {
   profile_is_dm: "Is profile se DM campaign chalta hai. Finder ke liye alag Instagram account aur alag Browser Use profile chahiye.",
   profile_is_finder: "Ye profile creator finder ka hai. DM ke liye apna DM wala profile chuno.",
   nothing_to_read: "Is search mein dekhne ko koi profile nahi bacha. Aur seeds jodo.",
-  finder_not_configured: "Browser Use key set nahi hai. Render → Environment mein BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
+  finder_not_configured: "Browser Use key set nahi hai. Render → Environment mein FINDER_BROWSER_USE_API_KEY (finder ka alag account) ya BROWSER_USE_API_KEY daalo (key kisi chat mein mat bhejo).",
   invalid_review: "Ye creator nahi mila. Refresh karo."
 });
 const FINDER_PAUSES = {
@@ -2365,7 +2365,7 @@ async function loadFinderProfiles() {
   const keep = select.value;
   let profiles = [];
   let failed = false;
-  try { profiles = (await api("/api/dm/profiles")).profiles; } catch { failed = true; }
+  try { profiles = (await api("/api/finder/profiles")).profiles; } catch { failed = true; }
   // The DM account cannot be the finder's.
   const dmProfiles = new Set((dmState?.campaigns || []).map((campaign) => campaign.profile_id));
   select.replaceChildren(element("option", profiles.length ? "Finder wala profile chuno" : failed ? "Profiles load nahi hui · ID khud daalo" : "Koi profile nahi mili · ID khud daalo"));
