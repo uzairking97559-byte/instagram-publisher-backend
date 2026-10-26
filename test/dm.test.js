@@ -461,7 +461,7 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.deepEqual([done.data.replies[0].status, done.data.accounts[0].new], ["done", 0]);
 
   // With the campaign paused its browser closes; a check opens one just for
-  // replies (same India connection), which closes 3 minutes after.
+  // replies (same India connection), which closes 10 minutes after.
   await h.request(`/api/dm/campaigns/${id}/pause`, { method: "POST", cookie, body: {} });
   await tick();
   assert.equal([...fake.browsers.values()][0].status, "stopped");
@@ -470,7 +470,7 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.equal(driver.opened.length, 2);
   const second = [...fake.browsers.values()][1];
   assert.deepEqual([second.body.proxyCountryCode, second.body.metadata.purpose, second.status], ["in", "replies", "active"]);
-  advance(3 * 60000 + 1000);
+  advance(10 * 60000 + 1000);
   await tick();
   assert.equal(second.status, "stopped");
   assert.ok((await account()).cost_inr > 0, "reply checks show their own cost");
