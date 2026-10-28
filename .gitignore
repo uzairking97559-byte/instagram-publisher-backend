@@ -7,3 +7,7 @@ test-results/
 *.log
 
 bin/
+
+# Private notes for Claude Code on the owner's computer (business details; this repo is public)
+CLAUDE.local.md
+*.local.md
