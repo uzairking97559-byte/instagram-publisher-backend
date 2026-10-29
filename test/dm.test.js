@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { harness, json } = require("./helpers");
 const { parseUsernames, inWindow, nextHourAt, gapFactor } = require("../lib/dm");
+const { CdpError } = require("../lib/cdp");
 
 const KEY = "test-browser-use-key";
 const PROFILE = "35a603c8-5ea3-415e-a626-eb4d530cdcb4";
@@ -62,6 +63,7 @@ function fakeDriver(results = {}) {
         alive: () => alive,
         sendDm: async ({ username, message, previous }) => {
           sent.push({ username, message, previous });
+          if (results[username] instanceof Error) throw results[username];
           return results[username] || { status: "sent" };
         },
         readReplies: async ({ outgoing, known }) => {
@@ -180,6 +182,18 @@ test("a profile renamed in Browser Use shows its new name on saved campaigns", a
   assert.equal(first.data.renamed, 1);
   assert.equal((await campaign(created.data.campaign.id)).campaign.profile_name, "Personal Profile");
   assert.equal((await h.request("/api/dm/profiles", { cookie })).data.renamed, 0, "nothing left to rename");
+});
+
+test("a page that will not load is logged with what the browser said", async (t) => {
+  const { h, create, start, tick } = await setup(t, {
+    results: { one: new CdpError("navigation_failed", "net::ERR_TUNNEL_CONNECTION_FAILED") }
+  });
+  const created = await create({ usernames: "one" });
+  await start(created.data.campaign.id);
+  await tick();
+  const failure = h.logs.find((entry) => entry.event === "dm_send_error");
+  assert.deepEqual([failure.reason, failure.detail], ["navigation_failed", "net::ERR_TUNNEL_CONNECTION_FAILED"]);
+  assert.ok(h.logs.some((entry) => entry.event === "dm_not_sent" && entry.reason === "page_error"));
 });
 
 test("the worker sends one message per gap, stops after a test run and reports the cost", async (t) => {
