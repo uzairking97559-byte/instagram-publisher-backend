@@ -1224,6 +1224,7 @@ const DM_REASONS = {
   profile_timeout: "Profile load nahi hui",
   message_button_lost: "Message button nahi dab paya",
   chat_not_opened: "Chat nahi khuli",
+  search_empty: "Instagram search khali aayi · baad mein dobara try hoga",
   chat_ambiguous: "Sahi chat pehchan nahi payi",
   focus_failed: "Message box nahi mila",
   typing_failed: "Message type nahi ho paya",
