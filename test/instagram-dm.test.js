@@ -63,7 +63,7 @@ if (window.PRE_OPEN) openChat(window.PRE_OPEN, []);
 // whose Chat button opens the chat in place (the address changes, no reload).
 // Pressing New message again while its window is still loading cancels it.
 // INBOX_MODE "dead": the icon does nothing; "slow": the window takes 700 ms
-// and its search box has no name.
+// and its search box has no name; "blank": the search never lists anything.
 if (window.INBOX) {
   const users = window.INBOX, mode = window.INBOX_MODE || 'ok';
   let loading = null;
@@ -81,6 +81,9 @@ if (window.INBOX) {
     input.addEventListener('input', () => setTimeout(() => {
       results.innerHTML = '';
       const query = input.value.trim().toLowerCase();
+      // Like Instagram: a search with no match says so; "blank" mode shows nothing at all.
+      if (mode === 'blank') return;
+      if (query && !Object.keys(users).some((name) => name.startsWith(query))) { results.innerHTML = '<div>No account found.</div>'; return; }
       for (const [name, info] of Object.entries(users)) {
         if (!query || !name.startsWith(query)) continue;
         // Like Instagram: the names sit in plain divs, the checkbox in its own empty label.
@@ -327,6 +330,16 @@ test("inbox: waits for a slow New message window and finds a search box with ano
   const missing = await session.sendDm({ username: "carol3", message: MESSAGE });
   assert.deepEqual([missing.status, missing.reason], ["skipped", "not_found"]);
   assert.match(missing.detail, /^typed=carol3 text=New message/);
+});
+
+test("inbox: a search that shows nothing at all is a failure to retry, not a missing account", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { baseUrl } = await serve(t, "blank");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+
+  const blank = await session.sendDm({ username: "alice3", message: MESSAGE });
+  assert.deepEqual([blank.status, blank.reason], ["failed", "search_empty"]);
+  assert.match(blank.detail, /^typed=alice3 text=New message To: Chat$/);
 });
 
 test("inbox: falls back to the profile when New message does not open, and stops trying after two misses", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
