@@ -196,6 +196,27 @@ test("a page that will not load is logged with what the browser said", async (t)
   assert.ok(h.logs.some((entry) => entry.event === "dm_not_sent" && entry.reason === "page_error"));
 });
 
+test("after three skips in a row the next DM waits a normal gap, not 15 seconds", async (t) => {
+  const missing = { status: "skipped", reason: "not_found" };
+  const { driver, create, campaign, start, tick, advance } = await setup(t, { results: { a: missing, b: missing, c: missing } });
+  const created = await create({ usernames: "a\nb\nc\nd" });
+  const id = created.data.campaign.id;
+  await start(id);
+  const next = async () => new Date((await campaign(id)).campaign.next_send_at).getTime() - new Date(NOON_IST).getTime();
+  await tick();
+  assert.equal(await next(), 15000, "one skip: the next name 15 s later");
+  advance(15000);
+  await tick();
+  assert.equal(await next(), 30000);
+  advance(15000);
+  await tick();
+  assert.deepEqual(driver.sent.map((item) => item.username), ["a", "b", "c"]);
+  assert.equal(await next(), 30000 + 9 * 60000, "third skip in a row: a full gap");
+  advance(15000);
+  await tick();
+  assert.equal(driver.sent.length, 3, "nothing before the gap");
+});
+
 test("the worker sends one message per gap, stops after a test run and reports the cost", async (t) => {
   const { h, fake, driver, cookie, advance, create, campaign, start, tick } = await setup(t, {
     results: { two: { status: "skipped", reason: "already_in_thread" } }
