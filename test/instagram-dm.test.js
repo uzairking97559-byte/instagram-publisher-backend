@@ -63,7 +63,8 @@ if (window.PRE_OPEN) openChat(window.PRE_OPEN, []);
 // whose Chat button opens the chat in place (the address changes, no reload).
 // Pressing New message again while its window is still loading cancels it.
 // INBOX_MODE "dead": the icon does nothing; "slow": the window takes 700 ms
-// and its search box has no name; "blank": the search never lists anything.
+// and its search box has no name; "blank": the search never lists anything;
+// "limited": the search says "Something went wrong. Try again later."
 if (window.INBOX) {
   const users = window.INBOX, mode = window.INBOX_MODE || 'ok';
   let loading = null;
@@ -83,6 +84,7 @@ if (window.INBOX) {
       const query = input.value.trim().toLowerCase();
       // Like Instagram: a search with no match says so; "blank" mode shows nothing at all.
       if (mode === 'blank') return;
+      if (mode === 'limited') { results.innerHTML = '<div>Something went wrong. Try again later.</div>'; return; }
       if (query && !Object.keys(users).some((name) => name.startsWith(query))) { results.innerHTML = '<div>No account found.</div>'; return; }
       for (const [name, info] of Object.entries(users)) {
         if (!query || !name.startsWith(query)) continue;
@@ -340,6 +342,17 @@ test("inbox: a search that shows nothing at all is a failure to retry, not a mis
   const blank = await session.sendDm({ username: "alice3", message: MESSAGE });
   assert.deepEqual([blank.status, blank.reason], ["failed", "search_empty"]);
   assert.match(blank.detail, /^typed=alice3 text=New message To: Chat$/);
+});
+
+test("inbox: a search that says \"Try again later\" stops at once as a rate limit", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { baseUrl } = await serve(t, "limited");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+
+  const started = Date.now();
+  const limited = await session.sendDm({ username: "alice3", message: MESSAGE });
+  assert.deepEqual(limited, { status: "blocked", reason: "action_blocked", text: "Something went wrong. Try again later.", attempted: false });
+  assert.ok(Date.now() - started < FAST.search, "does not wait out the search");
 });
 
 test("inbox: falls back to the profile when New message does not open, and stops trying after two misses", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
