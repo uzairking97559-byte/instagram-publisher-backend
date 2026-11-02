@@ -139,6 +139,18 @@ test("telegram: linked once from the website, then replies come in and answers g
   const results = fake.sent.slice(-2).map((message) => message.text);
   assert.deepEqual(results, ["✅ @one ko jawab gaya: “Hello ji, bataiye”", "❌ @one ko jawab nahi gaya (DM nahi pahuncha (sirf followers se message leta hai)): “Hi one, details: ₹800 per 1M views.”"]);
 
+  // Auto answers (Auto-jawab) are announced only when they fail.
+  const yesterday = new Date(clock.now.getTime() - 86400000);
+  const other = (await h.db.query(
+    "INSERT INTO dm_replies(profile_id,thread,username,name,row_key,text,status,received_at,announced_at) VALUES($1,'/direct/t/2/','two','Two','Two|Hi','Hi','answered',$2,$2) RETURNING id::text AS id",
+    [PROFILE, yesterday])).rows[0].id;
+  await h.db.query(
+    `INSERT INTO dm_outbox(reply_id,profile_id,message,auto,status,sent_at,created_at,updated_at)
+     VALUES($1,$2,'Auto one',TRUE,'sent',$3,$3,$4),($5,$2,'Auto two',TRUE,'failed',NULL,$4,$4)`, [reply, PROFILE, yesterday, clock.now, other]);
+  const sentBefore = fake.sent.length;
+  await tick();
+  assert.deepEqual(fake.sent.slice(sentBefore).map((message) => message.text), ["❌ @two ko auto-jawab nahi gaya (pata nahi): “Auto two”"]);
+
   // "Ho gaya" closes it and removes the buttons.
   await hook({ callback_query: { id: "cb2", data: `d:${reply}`, message: { message_id: announced.message_id, chat: { id: OWNER, type: "private" } } } });
   assert.equal((await h.db.query("SELECT status FROM dm_replies WHERE id=$1", [reply])).rows[0].status, "done");

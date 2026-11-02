@@ -1255,6 +1255,7 @@ Object.assign(messages, {
   browser_use_failed: "Browser Use se sahi jawab nahi mila. Thodi der baad try karo.",
   browser_use_unreachable: "Browser Use tak connection nahi hua. Thodi der baad try karo.",
   invalid_answer: "Jawab 1 se 1000 akshar ka likho.",
+  invalid_auto_answer: "Auto-jawab ka message likho (1000 akshar tak).",
   answers_waiting: "Is creator ke 3 jawab pehle se line mein hain. Unke jaane ka wait karo.",
   reply_not_found: "Ye reply ab nahi mila. Refresh karo.",
   invalid_profile: "Ye account nahi mila. Refresh karo.",
@@ -1694,8 +1695,46 @@ $("template-form").addEventListener("submit", async (event) => {
   } catch (error) { explain(error); }
   finally { button.disabled = false; }
 });
+// ---- Auto-jawab: one message sent by itself to everyone who writes back ----
+let autoDirty = false;
+function renderAuto() {
+  const auto = replyState && replyState.auto;
+  $("auto-panel").hidden = !auto;
+  if (!auto) return;
+  $("auto-state").textContent = auto.on ? "ON" : "OFF";
+  $("auto-state").classList.toggle("on", auto.on);
+  if (!autoDirty && document.activeElement !== $("auto-text")) $("auto-text").value = auto.message || "";
+  $("auto-on").textContent = auto.on ? "Naya message save karo" : "Save karke ON karo";
+  $("auto-on").disabled = !replyState.configured;
+  $("auto-off").hidden = !auto.on;
+  $("auto-off").disabled = false;
+}
+async function saveAuto(body) {
+  $("auto-on").disabled = true; $("auto-off").disabled = true;
+  try {
+    const result = await api("/api/dm/auto", { method: "POST", body: JSON.stringify(body) });
+    replyState = result;
+    autoDirty = false;
+    renderReplies();
+    updateDmPolling();
+    notice(!body.on ? "Auto-jawab OFF. Jo auto-jawab abhi gaye nahi the, wo ruk gaye."
+      : result.queued ? `Auto-jawab ON. Abhi ke ${result.queued} naye replies ko 1–2 minute mein jayega, aage har naye reply ko apne aap.`
+      : "Auto-jawab ON. Ab jo bhi jawab dega, use inbox check ke baad apne aap jayega.");
+  } catch (error) { explain(error); }
+  finally { renderAuto(); }
+}
+$("auto-text").addEventListener("input", () => { autoDirty = true; });
+$("auto-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("auto-text").value.trim();
+  if (!message) { $("auto-text").focus(); return; }
+  if (!replyState.auto.on && !confirm("Auto-jawab ON karna hai? Jo bhi DM ka jawab dega (abhi ke naye replies bhi), use yeh message usi account se apne aap chala jayega.")) return;
+  await saveAuto({ on: true, message });
+});
+$("auto-off").addEventListener("click", () => saveAuto({ on: false, message: $("auto-text").value.trim() }));
 function renderReplies() {
   renderToday();
+  renderAuto();
   const ready = Boolean(replyState && replyState.accounts.length);
   $("replies-body").hidden = !ready;
   $("replies-empty").hidden = !replyState || ready;
@@ -1764,7 +1803,7 @@ function replyCard(reply) {
   const meta = [reply.username && reply.name ? reply.name : null, formatWhen(reply.received_at)].filter(Boolean).join(" · ");
   card.append(element("p", meta, "job-meta"), element("p", reply.text, "reply-text"));
   for (const answer of reply.answers) {
-    const line = element("p", `Tum: ${answer.message}`, `reply-answer ${answer.status}`);
+    const line = element("p", `${answer.auto ? "Auto-jawab" : "Tum"}: ${answer.message}`, `reply-answer ${answer.status}`);
     const state = answer.status === "sent" ? `Gaya ✓ ${answer.sent_at ? formatWhen(answer.sent_at) : ""}`
       : answer.status === "failed" ? `Nahi gaya: ${ANSWER_REASONS[answer.reason] || DM_REASONS[answer.reason] || DM_PAUSES[answer.reason] || messages[answer.reason] || answer.reason || "pata nahi"}`
       : "Bhej rahe hain… (1–2 minute)";
@@ -2139,6 +2178,7 @@ function renderDmStats() {
   }
   body.append(stats);
   const extra = [`Kul kharcha ${rupees(totals.cost_inr)}`, `${totals.replies_received} reply aaye`, `${totals.answers_sent} jawab gaye`];
+  if (totals.auto_sent) extra.push(`${totals.auto_sent} auto-jawab`);
   if (totals.not_delivered) extra.unshift(`${totals.not_delivered} DM nahi pahunche`);
   body.append(element("p", extra.join(" · "), "dm-cost"));
   if (!totals.sent && !totals.not_delivered) {

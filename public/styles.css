@@ -422,6 +422,7 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
   vertical-align: middle;
   font-variant-numeric: tabular-nums;
 }
+.count.on { background: var(--leaf-soft); color: var(--leaf); }
 .empty { margin: 0; padding: 20px; border: 1px dashed var(--seam-strong); border-radius: var(--radius); color: var(--haze); font-size: 15px; }
 .side-note, .activity-note { margin-top: 18px; padding: 2px 0 2px 14px; border-left: 3px solid var(--seam-strong); font-size: 14px; }
 .side-note strong, .activity-note strong { font-weight: 650; }

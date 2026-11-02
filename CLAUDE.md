@@ -29,7 +29,8 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    details (they commented on the owner's Reels), from an Instagram login kept in a
    **Browser Use** cloud browser profile, driven over the Chrome DevTools Protocol with
    fixed steps (no AI model per message). **Replies** per account, answers typed on the
-   website, saved answers, **Hisaab** (per account and per message version: reach, replies,
+   website, saved answers, **Auto-jawab** (off by default; the owner's one message sent by
+   itself to each person who writes back, once), **Hisaab** (per account and per message version: reach, replies,
    ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
    and posts a morning report of the day before. A second bot, **Workwithme**, talks to
    creators: page link, logo and rules, first Reel approved by the owner, UPI, every Reel
