@@ -359,6 +359,7 @@ function loginSite(seen) {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       seen.push(`${req.method} ${req.url}`);
+      if (req.method === "GET" && req.url.startsWith("/accounts/")) seen.push(`language ${req.headers["accept-language"] || ""}`);
       const json = (data, login) => {
         res.writeHead(200, { "content-type": "application/json", ...(login ? { "set-cookie": "sessionid=test-session; Path=/" } : {}) });
         res.end(JSON.stringify(data));
@@ -398,8 +399,8 @@ function loginSite(seen) {
       }
       if (req.url === "/saved" || req.url === "/robot") { res.writeHead(204); return res.end(); }
       // Like Instagram: a logged-in browser is sent away from the login page.
-      if (req.url === "/accounts/login/" && /sessionid=test-session/.test(req.headers.cookie || "")) { res.writeHead(302, { location: "/" }); return res.end(); }
       const [route] = req.url.split("?");
+      if (route === "/accounts/login/" && /sessionid=test-session/.test(req.headers.cookie || "")) { res.writeHead(302, { location: "/" }); return res.end(); }
       const page = pages[route];
       res.writeHead(page ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
       res.end(page || "not found");
@@ -407,13 +408,13 @@ function loginSite(seen) {
   });
 }
 
-async function loginSession(t) {
+async function loginSession(t, { english = false } = {}) {
   const seen = [];
   const server = loginSite(seen);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t), { block: [] });
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t), { block: [], ...(english ? { english } : {}) });
   t.after(() => session.close());
   return { session, seen, baseUrl };
 }
@@ -430,6 +431,15 @@ test("login: types the username and password exactly, then a wrong password, a c
   assert.ok(seen.includes("typed new.page / wrong one") && seen.includes("typed new.page / check me"), "typed exactly as given");
   assert.ok(seen.includes("POST /saved"), "Save your login info: Save");
   assert.deepEqual(await session.login({ username: "x", password: "y" }), { status: "logged_in", already: true });
+});
+
+test("login: the website's login browser asks for Instagram in English", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen } = await loginSession(t, { english: true });
+  assert.deepEqual(await session.requestReset({ username: "nobody" }), { status: "no_account" });
+  assert.ok(seen.includes("GET /accounts/password/reset/?hl=en"), "forgot password in English");
+  assert.deepEqual(await session.login({ username: "new.page", password: "right pass@1" }), { status: "logged_in" });
+  assert.ok(seen.includes("GET /accounts/login/?hl=en"), "the login page with hl=en");
+  assert.ok(seen.includes("language en-US,en;q=0.9"), "and English as the browser's language");
 });
 
 test("login: the right password logs in; a captcha waits for the owner's tap from the website", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {

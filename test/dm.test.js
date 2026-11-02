@@ -251,7 +251,7 @@ test("a new account: the website logs it in to a Browser Use profile and never k
   assert.equal(result.status, 200);
   assert.deepEqual([result.data.status, result.data.profile_name], ["logged_in", "DM 3"]);
   assert.deepEqual(driver.account.typed, [["new.page", PASSWORD]]);
-  assert.deepEqual(driver.account.options.at(-1), { block: [] }, "a login browser loads everything, so a check shows");
+  assert.deepEqual(driver.account.options.at(-1), { block: [], english: true }, "a login browser loads everything, so a check shows, in English");
   assert.equal(fake.profiles.find((item) => item.name === "DM 3").id, result.data.profile_id);
   assert.ok([...fake.browsers.keys()].every(stopped), "the browser stops, which saves the login");
   // The same name again uses that profile, not a new one.
