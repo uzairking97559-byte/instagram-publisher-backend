@@ -331,7 +331,8 @@ function loginSite(seen) {
     // a real click counts). Enter in the password box logs in, except for the
     // username "clicker", where only a real click on Log in works.
     "/accounts/login/": html('<form id="f"><input name="decoy" type="text" style="display:none"><input name="username" type="text"><input name="password" type="password">' +
-      '<input type="submit" style="display:none"><div role="button" id="go">Log in</div></form><p id="err" role="alert"></p>',
+      '<input type="submit" style="display:none"><div role="button" id="go">Log in</div></form><p id="err" role="alert"></p>' +
+      '<iframe title="reCAPTCHA" src="about:blank#captcha" style="width:0;height:0;border:0"></iframe>',
       send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }") +
       "document.getElementById('go').addEventListener('click', (e) => { if (e.isTrusted) document.getElementById('f').requestSubmit(); });" +
       "document.querySelector('input[name=password]').addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); " +
@@ -368,6 +369,7 @@ function loginSite(seen) {
         if (p === "fresh pass1") return json({ next: "/accounts/onetap/" }, true);
         if (p === "silent me") return json({});
         if (p === "later me") return json({ error: "There was a problem logging you into Instagram. Please try again soon." });
+        if (p === "hindi wrong") return json({ error: "आपने जो लॉग इन जानकारी डाली है वह गलत है. अपना सही अकाउंट ढूँढें और लॉग इन करें." });
         return json({ error: "Sorry, your password was incorrect. Please double-check your password." });
       }
       if (req.url === "/code") {
@@ -415,6 +417,7 @@ async function loginSession(t) {
 test("login: types the username and password exactly, then a wrong password, a code check and Save", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
   const { session, seen } = await loginSession(t);
   assert.deepEqual(await session.login({ username: "new.page", password: "wrong one" }), { status: "wrong_password" });
+  assert.deepEqual(await session.login({ username: "new.page", password: "hindi wrong" }), { status: "wrong_password" }, "Instagram's Hindi line; the invisible captcha frame doesn't count");
   assert.deepEqual(await session.login({ username: "new.page", password: "check me" }), { status: "needs_check", text: "code", code: true });
   assert.equal(await session.loggedIn(), false);
   assert.deepEqual(await session.enterCode({ code: "000000" }), { status: "wrong_code" });
