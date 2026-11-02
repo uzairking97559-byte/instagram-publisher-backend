@@ -118,7 +118,9 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
   and a finder profile can't run DM campaigns (enforced in code). Never clear or delete a
   profile without the owner.
 - Do not create Instagram accounts, solve captchas, bypass Instagram security checks, fake
-  human activity, or help an account avoid being linked to suspended ones.
+  human activity, or help an account avoid being linked to suspended ones. The new-account
+  login (Messages → Naya campaign) stops at every Instagram check; the owner does it himself
+  (his code, or his own taps relayed from the screenshot). Never store or log the password.
 - Current state (25 Oct 2026): the first DM account's profile and the finder profile were
   deleted by the owner. DMs go from an older account in profile "DM 1" (it passed a 5-DM
   test; ~20/day, 12-minute gap, India proxy). A second account was logged in to a new

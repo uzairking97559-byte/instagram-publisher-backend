@@ -280,7 +280,7 @@ async function api(path, options = {}) {
     let response;
     try {
       response = await fetch(path, { credentials: "same-origin", ...options,
-        headers: { "Content-Type": "application/json", ...options.headers }, signal: AbortSignal.timeout(35000) });
+        headers: { "Content-Type": "application/json", ...options.headers }, signal: AbortSignal.timeout(options.timeoutMs || 35000) });
     } catch (error) {
       if ((readOnly || idempotentBatch) && error?.name !== "TimeoutError" && attempt < retryDelays.length) {
         await waitToRetry(retryDelays[attempt]);
@@ -1258,7 +1258,15 @@ Object.assign(messages, {
   answers_waiting: "Is creator ke 3 jawab pehle se line mein hain. Unke jaane ka wait karo.",
   reply_not_found: "Ye reply ab nahi mila. Refresh karo.",
   invalid_profile: "Ye account nahi mila. Refresh karo.",
-  profile_not_found: "Ye account nahi mila. Refresh karo."
+  profile_not_found: "Ye account nahi mila. Refresh karo.",
+  invalid_account_login: "Profile ka naam (60 akshar tak), Instagram username aur password teeno bharo.",
+  login_busy: "Ek login pehle se chal raha hai ya check ka wait kar raha hai. Use poora karo ya “Band karo” dabao.",
+  profile_in_use: "Is naam ki profile pehle se kisi campaign ya finder ka account hai. Naya naam do (jaise DM 3).",
+  login_not_found: "Ye login ab khula nahi hai (15 minute baad apne aap band ho jaata hai). Dobara try karo.",
+  invalid_code: "Code sirf number hota hai (4–8 akshar). Phone/email par aaya code dobara dekho.",
+  screen_failed: "Browser ki photo nahi mil payi. Thodi der baad “Photo refresh karo” dabao.",
+  invalid_input: "Photo par tap karo, ya 100 akshar tak likho.",
+  input_failed: "Instagram ke browser tak tap nahi pahuncha. “Photo refresh karo” dabao aur dobara try karo."
 });
 let dmState = null;
 let dmLoadedAt = 0;
@@ -1909,6 +1917,115 @@ $("dm-form").addEventListener("submit", async (event) => {
     showView("campaigns");
     await loadDm();
   } catch (error) { explain(error); }
+  finally { button.disabled = false; }
+});
+// ---- New Instagram account: the website logs it in (the password is used once) ----
+const ACCOUNT_RESULTS = {
+  logged_in: "✅ Login ho gaya aur profile mein save ho gaya. Ab neeche campaign banao (account mein ye profile chuno) aur pehle “Pehle 5 (test)” chalao.",
+  already: "Is profile mein pehle se Instagram login hai. Neeche campaign bana sakte ho.",
+  wrong_password: "Instagram ne username ya password galat bataya. Phone par check karke hi dobara try karo, baar baar try mat karo.",
+  needs_check: "Instagram check maang raha hai (code, OTP ya captcha). Browser Use mein chal raha browser kholo (Browsers mein), check khud poora karo, phir “Ho gaya” dabao. 15 minute mein band ho jayega.",
+  waiting: "Abhi login nahi dikha. Check poora karke phir “Ho gaya” dabao.",
+  code: "Instagram ne code bheja hai (SMS, email ya app par). Wo code neeche daalo aur “Code bhejo” dabao.",
+  wrong_code: "Instagram ne code galat bataya. Naya code aaya ho toh wo daalo.",
+  no_code_box: "Is page par code ka box nahi mila. Browser Use mein browser kholo aur check khud poora karo, phir “Ho gaya” dabao.",
+  cancelled: "Login band kar diya.",
+  failed: "Login poora nahi hua. Thodi der baad dobara try karo."
+};
+function renderAccountResult(data) {
+  const box = $("account-result");
+  box.hidden = false;
+  const key = data.status === "logged_in" && data.already ? "already" : data.wrong_code ? "wrong_code" : data.no_code_box ? "no_code_box"
+    : data.waiting ? "waiting" : data.status === "needs_check" && data.code ? "code" : data.status;
+  box.replaceChildren(element("p", `${data.profile_name ? `${data.profile_name}: ` : ""}${ACCOUNT_RESULTS[key] || ACCOUNT_RESULTS.failed}`));
+  if (data.status !== "needs_check" || !data.browser_id) return;
+  // What Instagram shows now (a code box, "I'm not a robot", …).
+  const shot = document.createElement("img");
+  shot.className = "login-screen"; shot.alt = "Instagram abhi kya dikha raha hai";
+  const refreshShot = () => { shot.src = `/api/dm/accounts/${data.browser_id}/screen?t=${Date.now()}`; };
+  shot.addEventListener("error", () => { shot.hidden = true; });
+  shot.addEventListener("load", () => { shot.hidden = false; });
+  refreshShot();
+  // A tap on the photo is a tap in Instagram's page, at the same spot.
+  const send = async (input) => {
+    try {
+      await api(`/api/dm/accounts/${data.browser_id}/input`, { method: "POST", body: JSON.stringify(input) });
+      setTimeout(refreshShot, 1500);
+    } catch (error) { explain(error); }
+  };
+  shot.addEventListener("click", (event) => {
+    if (!shot.clientWidth || !shot.clientHeight) return;
+    const x = Math.min(1, Math.max(0, event.offsetX / shot.clientWidth)), y = Math.min(1, Math.max(0, event.offsetY / shot.clientHeight));
+    void send({ x, y });
+  });
+  const shotButton = element("button", "Photo refresh karo", "quiet"); shotButton.type = "button";
+  shotButton.addEventListener("click", refreshShot);
+  box.append(element("p", "Photo par jahan tap karoge, Instagram mein wahi tap hoga (jaise “I'm not a robot” ka box). Phir nayi photo aayegi.", "hint"), shot, shotButton);
+  // Typing into whatever box was tapped last.
+  const typeForm = element("form", undefined, "dm-form");
+  const typeInput = document.createElement("input");
+  typeInput.type = "text"; typeInput.maxLength = 100; typeInput.autocomplete = "off"; typeInput.placeholder = "Pehle photo mein box par tap karo, phir yahan likho";
+  typeInput.setAttribute("aria-label", "Instagram mein type karo");
+  const typeButton = element("button", "Type karo", "quiet"); typeButton.type = "submit";
+  typeForm.append(typeInput, typeButton);
+  typeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!typeInput.value) return;
+    void send({ text: typeInput.value });
+    typeInput.value = "";
+  });
+  box.append(typeForm);
+  // The code Instagram sent: typed here, the website puts it into Instagram.
+  const codeForm = element("form", undefined, "dm-form");
+  const codeInput = document.createElement("input");
+  codeInput.type = "text"; codeInput.inputMode = "numeric"; codeInput.autocomplete = "one-time-code"; codeInput.maxLength = 12;
+  codeInput.placeholder = "Instagram ka code (jaise 123456)"; codeInput.setAttribute("aria-label", "Instagram ka code");
+  const codeButton = element("button", "Code bhejo", "primary"); codeButton.type = "submit";
+  codeForm.append(codeInput, codeButton);
+  codeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const code = codeInput.value.trim();
+    if (!code) return;
+    codeButton.disabled = true;
+    try {
+      const result = await api(`/api/dm/accounts/${data.browser_id}/code`, { method: "POST", timeoutMs: 90000, body: JSON.stringify({ code }) });
+      renderAccountResult(result);
+      if (result.status === "logged_in") { dmProfilesLoaded = false; dmProfileList = null; void loadDmProfiles(); }
+    } catch (error) { explain(error); codeButton.disabled = false; }
+  });
+  box.append(codeForm);
+  const actions = element("div", undefined, "dm-actions");
+  if (data.live_url) {
+    const link = element("a", "Browser kholo", "quiet strong");
+    link.href = data.live_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    actions.append(link);
+  }
+  const finish = (cancel) => async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const result = await api(`/api/dm/accounts/${data.browser_id}/done`, { method: "POST", body: JSON.stringify({ cancel }) });
+      renderAccountResult(result);
+      if (result.status === "logged_in") { dmProfilesLoaded = false; dmProfileList = null; void loadDmProfiles(); }
+    } catch (error) { explain(error); button.disabled = false; }
+  };
+  const done = element("button", "Ho gaya", "primary"); done.type = "button"; done.addEventListener("click", finish(false));
+  const cancel = element("button", "Band karo", "quiet"); cancel.type = "button"; cancel.addEventListener("click", finish(true));
+  actions.append(done, cancel);
+  box.append(actions);
+}
+$("account-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("account-save"), password = $("account-password");
+  const body = JSON.stringify({ name: $("account-name").value.trim(), username: $("account-username").value.trim(), password: password.value });
+  password.value = "";
+  button.disabled = true;
+  $("account-result").hidden = false;
+  $("account-result").replaceChildren(element("p", "Login ho raha hai… 1–2 minute lag sakte hain. Page band mat karo."));
+  try {
+    const data = await api("/api/dm/accounts", { method: "POST", timeoutMs: 180000, body });
+    renderAccountResult(data);
+    if (data.status === "logged_in") { dmProfilesLoaded = false; dmProfileList = null; void loadDmProfiles(); }
+  } catch (error) { $("account-result").hidden = true; explain(error); }
   finally { button.disabled = false; }
 });
 // ---- Hisaab: DMs, replies and cost per account and per message version ----

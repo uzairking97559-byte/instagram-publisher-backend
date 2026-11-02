@@ -315,6 +315,92 @@ test("sends from the Direct inbox, loading the inbox page only once", { skip: !C
   assert.equal(requests.includes("/picture.png"), false);
 });
 
+// LOGIN: Instagram's login page and what follows it. "right pass@1" logs in
+// (a session cookie, then "Save your login info?"); "check me" asks for a code
+// (123456 is right); "robot me" shows an "I'm not a robot" box; anything else
+// is a wrong password. Every request is noted in `seen`.
+function loginSite(seen) {
+  const html = (body, script = "") => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<script>${script}</script></body></html>`;
+  const send = (form, url, field) => `document.getElementById('${form}').addEventListener('submit', async (e) => { e.preventDefault(); ` +
+    `const r = await fetch('${url}', { method: 'POST', body: JSON.stringify(${field}) }); const d = await r.json(); ` +
+    "if (d.next) location.href = d.next; else document.getElementById('err').textContent = d.error; });";
+  const pages = {
+    "/accounts/login/": html('<form id="f"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err"></p>',
+      send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }")),
+    "/challenge/": html('<form id="c"><p>Enter the code we sent to your number</p><input name="verificationCode" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
+      send("c", "/code", "{ c: e.target.verificationCode.value }")),
+    "/challenge/robot/": html('<div id="robot" style="position:fixed;left:0;top:0;width:200px;height:100px">I\'m not a robot</div>',
+      "document.getElementById('robot').addEventListener('click', () => { fetch('/robot', { method: 'POST' }); });"),
+    "/accounts/onetap/": html('<p>Save your login info?</p><button id="s">Save info</button><button>Not now</button>',
+      "document.getElementById('s').addEventListener('click', () => { fetch('/saved', { method: 'POST' }).then(() => { location.href = '/'; }); });"),
+    "/": html("<main>Home</main>")
+  };
+  return http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      seen.push(`${req.method} ${req.url}`);
+      const json = (data, login) => {
+        res.writeHead(200, { "content-type": "application/json", ...(login ? { "set-cookie": "sessionid=test-session; Path=/" } : {}) });
+        res.end(JSON.stringify(data));
+      };
+      if (req.url === "/try") {
+        const { u, p } = JSON.parse(body);
+        seen.push(`typed ${u} / ${p}`);
+        if (p === "right pass@1") return json({ next: "/accounts/onetap/" }, true);
+        if (p === "check me") return json({ next: "/challenge/" });
+        if (p === "robot me") return json({ next: "/challenge/robot/" });
+        return json({ error: "Sorry, your password was incorrect. Please double-check your password." });
+      }
+      if (req.url === "/code") {
+        const { c } = JSON.parse(body);
+        if (c === "123456") return json({ next: "/accounts/onetap/" }, true);
+        return json({ error: "That code isn't right. Please check the code we sent you." });
+      }
+      if (req.url === "/saved" || req.url === "/robot") { res.writeHead(204); return res.end(); }
+      const page = pages[req.url];
+      res.writeHead(page ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
+      res.end(page || "not found");
+    });
+  });
+}
+
+async function loginSession(t) {
+  const seen = [];
+  const server = loginSite(seen);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const session = await createInstagramDriver({ baseUrl: `http://127.0.0.1:${server.address().port}`, timing: FAST }).open(await launchChrome(t), { block: [] });
+  t.after(() => session.close());
+  return { session, seen };
+}
+
+test("login: types the username and password exactly, then a wrong password, a code check and Save", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen } = await loginSession(t);
+  assert.deepEqual(await session.login({ username: "new.page", password: "wrong one" }), { status: "wrong_password" });
+  assert.deepEqual(await session.login({ username: "new.page", password: "check me" }), { status: "needs_check", text: "code", code: true });
+  assert.equal(await session.loggedIn(), false);
+  assert.deepEqual(await session.enterCode({ code: "000000" }), { status: "wrong_code" });
+  assert.deepEqual(await session.enterCode({ code: "123456" }), { status: "logged_in" }, "the old wrong-code line does not count against the new code");
+  assert.equal(await session.loggedIn(), true);
+  assert.ok(seen.includes("typed new.page / wrong one") && seen.includes("typed new.page / check me"), "typed exactly as given");
+  assert.ok(seen.includes("POST /saved"), "Save your login info: Save");
+  assert.deepEqual(await session.login({ username: "x", password: "y" }), { status: "logged_in", already: true });
+});
+
+test("login: the right password logs in; a captcha waits for the owner's tap from the website", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen } = await loginSession(t);
+  const robot = await session.login({ username: "new.page", password: "robot me" });
+  assert.deepEqual([robot.status, robot.code], ["needs_check", false]);
+  const shot = await session.screenshot();
+  assert.deepEqual([...shot.subarray(0, 2)], [0xff, 0xd8], "a JPEG of the page");
+  await session.tap({ x: 100 / 1366, y: 50 / 900 });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.ok(seen.includes("POST /robot"), "the tap lands where the owner tapped on the photo");
+  assert.deepEqual(await session.login({ username: "new.page", password: "right pass@1" }), { status: "logged_in" });
+  assert.ok(seen.includes("typed new.page / right pass@1") && seen.includes("POST /saved"));
+});
+
 async function serve(t, inbox) {
   const requests = [];
   const server = site(requests, inbox);
