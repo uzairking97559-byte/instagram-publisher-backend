@@ -15,7 +15,7 @@ const { createInstagramDriver } = require("../lib/instagram-dm");
 
 const CHROME = process.env.DM_TEST_CHROME;
 const MESSAGE = "Hey! 👋 We're inviting Instagram page owners to join our Paid Logo Promotion Program! 💰 Earn ₹800 per 1 Million Views. Interested? Reply YES and I'll share the details!";
-const FAST = { navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, dialog: 1000, delivery: 800, poll: 100 };
+const FAST = { login: 4000, navigation: 15000, profile: 8000, button: 1500, settle: 100, reclick: 700, chat: 4000, history: 300, send: 4000, search: 1500, dialog: 1000, delivery: 800, poll: 100 };
 // Instagram's notice when a message cannot reach someone.
 const NOTICE = "This account can't receive your message because they don't allow new message requests from everyone.";
 
@@ -325,7 +325,7 @@ function loginSite(seen) {
     `const r = await fetch('${url}', { method: 'POST', body: JSON.stringify(${field}) }); const d = await r.json(); ` +
     "if (d.next) location.href = d.next; else document.getElementById('err').textContent = d.error; });";
   const pages = {
-    "/accounts/login/": html('<form id="f"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err"></p>',
+    "/accounts/login/": html('<form id="f"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err" role="alert"></p>',
       send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }")),
     "/challenge/": html('<form id="c"><p>Enter the code we sent to your number</p><input name="verificationCode" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
       send("c", "/code", "{ c: e.target.verificationCode.value }")),
@@ -357,6 +357,8 @@ function loginSite(seen) {
         if (p === "check me") return json({ next: "/challenge/" });
         if (p === "robot me") return json({ next: "/challenge/robot/" });
         if (p === "fresh pass1") return json({ next: "/accounts/onetap/" }, true);
+        if (p === "silent me") return json({});
+        if (p === "later me") return json({ error: "There was a problem logging you into Instagram. Please try again soon." });
         return json({ error: "Sorry, your password was incorrect. Please double-check your password." });
       }
       if (req.url === "/code") {
@@ -425,6 +427,16 @@ test("login: the right password logs in; a captcha waits for the owner's tap fro
   assert.ok(seen.includes("POST /robot"), "the tap lands where the owner tapped on the photo");
   assert.deepEqual(await session.login({ username: "new.page", password: "right pass@1" }), { status: "logged_in" });
   assert.ok(seen.includes("typed new.page / right pass@1") && seen.includes("POST /saved"));
+});
+
+test("login: no answer from Instagram keeps the browser for the owner; \"try again soon\" says wait", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session } = await loginSession(t);
+  const silent = await session.login({ username: "new.page", password: "silent me" });
+  assert.deepEqual([silent.status, silent.timeout, silent.code], ["needs_check", true, false]);
+  assert.match(silent.detail, /^typed user=true password=true button=ok path=\/accounts\/login\//, "the boxes held what was typed");
+  assert.match(silent.text, /Log in/);
+  const later = await session.login({ username: "new.page", password: "later me" });
+  assert.deepEqual([later.status, later.text], ["try_later", "There was a problem logging you into Instagram. Please try again soon."]);
 });
 
 test("forgot password: a code, then a new password (too short, then good), logged in and saved", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {

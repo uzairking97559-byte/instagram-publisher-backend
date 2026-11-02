@@ -301,6 +301,17 @@ test("a new account: the website logs it in to a Browser Use profile and never k
   assert.equal((await h.request(`/api/dm/accounts/${cancelled}/done`, { method: "POST", cookie, body: { cancel: true } })).data.status, "cancelled");
   assert.ok(stopped(cancelled));
 
+  // No answer from Instagram: the browser waits with a screenshot; "try again soon" stops.
+  driver.account.result = { status: "needs_check", text: "Log in Forgot password?", code: false, timeout: true, detail: "typed user=true password=true button=ok" };
+  result = await add({ name: "DM 7", username: "fifth.page", password: PASSWORD });
+  assert.deepEqual([result.data.status, result.data.timeout], ["needs_check", true]);
+  assert.equal((await h.request(`/api/dm/accounts/${result.data.browser_id}/done`, { method: "POST", cookie, body: { cancel: true } })).data.status, "cancelled");
+  driver.account.result = { status: "try_later", text: "Please try again soon." };
+  result = await add({ name: "DM 7", username: "fifth.page", password: PASSWORD });
+  assert.equal(result.data.status, "try_later");
+  assert.ok([...fake.browsers.keys()].every(stopped));
+  assert.ok(h.logs.some((entry) => entry.event === "dm_login_result" && entry.note === "Log in Forgot password?"), "the page's words are logged when unknown");
+
   assert.doesNotMatch(JSON.stringify(h.logs), /s3cret|pass@word|123456/, "neither the password nor the code is logged");
   assert.equal((await h.request("/api/dm/accounts", { method: "POST", body: { name: "x", username: "y", password: "z" } })).status, 401, "owner only");
 });

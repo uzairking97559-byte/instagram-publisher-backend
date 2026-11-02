@@ -1935,6 +1935,8 @@ const ACCOUNT_RESULTS = {
   new_password: "Ab naya password daalo (kam se kam 6 akshar, letters + number) aur “Password set karo” dabao.",
   weak_password: "Instagram ne ye password nahi liya (bahut aasaan ya chhota). Doosra password daalo.",
   no_account: "Instagram ko is username ka account nahi mila. Username check karo.",
+  timeout: "Log in dabane ke baad Instagram ne jawab nahi diya. Neeche photo dekho: koi message likha ho toh padho (ya screenshot mujhe bhejo). “Log in” button dikhe toh photo mein us par tap karo, 5 second ruk kar “Photo refresh karo”, aur login ho jaye toh “Ho gaya”.",
+  try_later: "Instagram ne kaha thodi der baad try karo (bahut baar try hua). 1–2 ghante ruk kar hi dobara try karna.",
   no_password_box: "Naye password ka box nahi mila. Photo dekho; zarurat ho toh browser mein khud poora karo, phir “Ho gaya”.",
   wrong_code: "Instagram ne code galat bataya. Naya code aaya ho toh wo daalo.",
   no_code_box: "Is page par code ka box nahi mila. Browser Use mein browser kholo aur check khud poora karo, phir “Ho gaya” dabao.",
@@ -1946,7 +1948,7 @@ function renderAccountResult(data) {
   box.hidden = false;
   const key = data.status === "logged_in" && data.already ? "already" : data.wrong_code ? "wrong_code" : data.no_code_box ? "no_code_box"
     : data.weak_password ? "weak_password" : data.no_password_box ? "no_password_box" : data.new_password ? "new_password"
-    : data.waiting ? "waiting" : data.link ? "link" : data.status === "needs_check" && data.code ? "code" : data.status;
+    : data.waiting ? "waiting" : data.link ? "link" : data.timeout ? "timeout" : data.status === "needs_check" && data.code ? "code" : data.status;
   box.replaceChildren(element("p", `${data.profile_name ? `${data.profile_name}: ` : ""}${ACCOUNT_RESULTS[key] || ACCOUNT_RESULTS.failed}`));
   if (data.status !== "needs_check" || !data.browser_id) return;
   // What Instagram shows now (a code box, "I'm not a robot", …).
