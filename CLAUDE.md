@@ -121,13 +121,13 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
   human activity, or help an account avoid being linked to suspended ones. The new-account
   login (Messages → Naya campaign) stops at every Instagram check; the owner does it himself
   (his code, or his own taps relayed from the screenshot). Never store or log the password.
-- Current state (25 Oct 2026): the first DM account's profile and the finder profile were
-  deleted by the owner. DMs go from an older account in profile "DM 1" (it passed a 5-DM
-  test; ~20/day, 12-minute gap, India proxy). A second account was logged in to a new
-  profile "DM 2" (Instagram asked for a check at login); it runs its own 5-DM test before
-  any daily sending, and stops for good on any further check. Add more accounts one at a
-  time, each after its own clean test. The finder needs a new profile before its first
-  50-profile test.
+- Current state (2 Nov 2026): profiles "DM 1" (older account; Instagram asked for a check on
+  1 Nov after the search-limit bug, fixed in #60; owner cleared it; 5-DM test passed 2 Nov),
+  "DM 2" (action-blocked 27 Oct; the owner chose to restart it; warm-up 10/day, no warning
+  since), "DM 4" (logged in from the website 2 Nov; its 5-DM test comes next). "DM 3" is an
+  empty profile from failed logins (delete only if the owner says so). Add more accounts one
+  at a time, each after its own clean 5-DM test. The finder needs a new profile before its
+  first 50-profile test.
 
 ## Environment variables (names only — values are set in Render)
 
