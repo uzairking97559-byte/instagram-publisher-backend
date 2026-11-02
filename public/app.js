@@ -1266,6 +1266,10 @@ Object.assign(messages, {
   invalid_code: "Code sirf number hota hai (4–8 akshar). Phone/email par aaya code dobara dekho.",
   screen_failed: "Browser ki photo nahi mil payi. Thodi der baad “Photo refresh karo” dabao.",
   invalid_input: "Photo par tap karo, ya 100 akshar tak likho.",
+  invalid_link: "Ye Instagram ka link nahi lagta. Email mein Instagram wala button/link copy karke daalo (https://instagram.com/… se shuru).",
+  invalid_new_password: "Naya password kam se kam 6 akshar ka rakho.",
+  profile_running: "Is account ki campaign abhi chal rahi hai. Pehle use Pause karo, phir login karo.",
+  account_mismatch: "Is profile mein pehle doosra Instagram account tha. Ek profile mein ek hi account: naya naam do (jaise DM 4) ya wahi username daalo.",
   input_failed: "Instagram ke browser tak tap nahi pahuncha. “Photo refresh karo” dabao aur dobara try karo."
 });
 let dmState = null;
@@ -1927,6 +1931,11 @@ const ACCOUNT_RESULTS = {
   needs_check: "Instagram check maang raha hai (code, OTP ya captcha). Browser Use mein chal raha browser kholo (Browsers mein), check khud poora karo, phir “Ho gaya” dabao. 15 minute mein band ho jayega.",
   waiting: "Abhi login nahi dikha. Check poora karke phir “Ho gaya” dabao.",
   code: "Instagram ne code bheja hai (SMS, email ya app par). Wo code neeche daalo aur “Code bhejo” dabao.",
+  link: "Instagram ne email/SMS par link bheja hai. Email kholo, link copy karo (button par long-press → Copy link) aur neeche “Link” mein paste karo.",
+  new_password: "Ab naya password daalo (kam se kam 6 akshar, letters + number) aur “Password set karo” dabao.",
+  weak_password: "Instagram ne ye password nahi liya (bahut aasaan ya chhota). Doosra password daalo.",
+  no_account: "Instagram ko is username ka account nahi mila. Username check karo.",
+  no_password_box: "Naye password ka box nahi mila. Photo dekho; zarurat ho toh browser mein khud poora karo, phir “Ho gaya”.",
   wrong_code: "Instagram ne code galat bataya. Naya code aaya ho toh wo daalo.",
   no_code_box: "Is page par code ka box nahi mila. Browser Use mein browser kholo aur check khud poora karo, phir “Ho gaya” dabao.",
   cancelled: "Login band kar diya.",
@@ -1936,7 +1945,8 @@ function renderAccountResult(data) {
   const box = $("account-result");
   box.hidden = false;
   const key = data.status === "logged_in" && data.already ? "already" : data.wrong_code ? "wrong_code" : data.no_code_box ? "no_code_box"
-    : data.waiting ? "waiting" : data.status === "needs_check" && data.code ? "code" : data.status;
+    : data.weak_password ? "weak_password" : data.no_password_box ? "no_password_box" : data.new_password ? "new_password"
+    : data.waiting ? "waiting" : data.link ? "link" : data.status === "needs_check" && data.code ? "code" : data.status;
   box.replaceChildren(element("p", `${data.profile_name ? `${data.profile_name}: ` : ""}${ACCOUNT_RESULTS[key] || ACCOUNT_RESULTS.failed}`));
   if (data.status !== "needs_check" || !data.browser_id) return;
   // What Instagram shows now (a code box, "I'm not a robot", …).
@@ -1994,6 +2004,46 @@ function renderAccountResult(data) {
     } catch (error) { explain(error); codeButton.disabled = false; }
   });
   box.append(codeForm);
+  // The link Instagram sent by email/SMS (login or reset link).
+  const linkForm = element("form", undefined, "dm-form");
+  const linkInput = document.createElement("input");
+  linkInput.type = "url"; linkInput.autocomplete = "off"; linkInput.placeholder = "Instagram ka link (https://instagram.com/…)";
+  linkInput.setAttribute("aria-label", "Instagram ka link");
+  const linkButton = element("button", "Link kholo", "quiet"); linkButton.type = "submit";
+  linkForm.append(linkInput, linkButton);
+  linkForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!linkInput.value.trim()) return;
+    linkButton.disabled = true;
+    try {
+      const result = await api(`/api/dm/accounts/${data.browser_id}/link`, { method: "POST", timeoutMs: 90000, body: JSON.stringify({ url: linkInput.value.trim() }) });
+      renderAccountResult(result);
+      if (result.status === "logged_in") { dmProfilesLoaded = false; dmProfileList = null; void loadDmProfiles(); }
+    } catch (error) { explain(error); linkButton.disabled = false; }
+  });
+  box.append(linkForm);
+  // The new password, when Instagram shows its new-password page.
+  if (data.new_password) {
+    const passForm = element("form", undefined, "dm-form");
+    const passInput = document.createElement("input");
+    passInput.type = "password"; passInput.autocomplete = "new-password"; passInput.maxLength = 256; passInput.placeholder = "Naya password";
+    passInput.setAttribute("aria-label", "Naya Instagram password");
+    const passButton = element("button", "Password set karo", "primary"); passButton.type = "submit";
+    passForm.append(passInput, passButton);
+    passForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const password = passInput.value;
+      passInput.value = "";
+      if (!password) return;
+      passButton.disabled = true;
+      try {
+        const result = await api(`/api/dm/accounts/${data.browser_id}/password`, { method: "POST", timeoutMs: 120000, body: JSON.stringify({ password }) });
+        renderAccountResult(result);
+        if (result.status === "logged_in") { dmProfilesLoaded = false; dmProfileList = null; void loadDmProfiles(); }
+      } catch (error) { explain(error); passButton.disabled = false; }
+    });
+    box.prepend(passForm);
+  }
   const actions = element("div", undefined, "dm-actions");
   if (data.live_url) {
     const link = element("a", "Browser kholo", "quiet strong");
@@ -2013,8 +2063,20 @@ function renderAccountResult(data) {
   actions.append(done, cancel);
   box.append(actions);
 }
+$("account-reset").addEventListener("click", async () => {
+  const button = $("account-reset");
+  const body = JSON.stringify({ name: $("account-name").value.trim(), username: $("account-username").value.trim() });
+  $("account-password").value = "";
+  button.disabled = true;
+  $("account-result").hidden = false;
+  $("account-result").replaceChildren(element("p", "Instagram se reset maang rahe hain… 1–2 minute lag sakte hain. Page band mat karo."));
+  try { renderAccountResult(await api("/api/dm/accounts/reset", { method: "POST", timeoutMs: 180000, body })); }
+  catch (error) { $("account-result").hidden = true; explain(error); }
+  finally { button.disabled = false; }
+});
 $("account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!$("account-password").value) { notice("Login ke liye password daalo. Password bhool gaye ho toh neeche wala button dabao.", true); return; }
   const button = $("account-save"), password = $("account-password");
   const body = JSON.stringify({ name: $("account-name").value.trim(), username: $("account-username").value.trim(), password: password.value });
   password.value = "";

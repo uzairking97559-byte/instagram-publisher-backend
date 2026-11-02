@@ -331,6 +331,12 @@ function loginSite(seen) {
       send("c", "/code", "{ c: e.target.verificationCode.value }")),
     "/challenge/robot/": html('<div id="robot" style="position:fixed;left:0;top:0;width:200px;height:100px">I\'m not a robot</div>',
       "document.getElementById('robot').addEventListener('click', () => { fetch('/robot', { method: 'POST' }); });"),
+    "/accounts/password/reset/": html('<form id="r"><p>Trouble logging in?</p><input name="cppEmailOrUsername" type="text"><button type="submit">Send login link</button></form><p id="err"></p>',
+      send("r", "/reset", "{ u: e.target.cppEmailOrUsername.value }")),
+    "/challenge/reset-code/": html('<form id="c"><p>Enter the 6-digit code we sent</p><input name="security_code" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
+      send("c", "/reset-code", "{ c: e.target.security_code.value }")),
+    "/accounts/password/reset/confirm/": html('<form id="n"><p>Create a strong password</p><input name="new_password1" type="password"><input name="new_password2" type="password"><button type="submit">Reset password</button></form><p id="err"></p>',
+      send("n", "/new-password", "{ a: e.target.new_password1.value, b: e.target.new_password2.value }")),
     "/accounts/onetap/": html('<p>Save your login info?</p><button id="s">Save info</button><button>Not now</button>',
       "document.getElementById('s').addEventListener('click', () => { fetch('/saved', { method: 'POST' }).then(() => { location.href = '/'; }); });"),
     "/": html("<main>Home</main>")
@@ -350,6 +356,7 @@ function loginSite(seen) {
         if (p === "right pass@1") return json({ next: "/accounts/onetap/" }, true);
         if (p === "check me") return json({ next: "/challenge/" });
         if (p === "robot me") return json({ next: "/challenge/robot/" });
+        if (p === "fresh pass1") return json({ next: "/accounts/onetap/" }, true);
         return json({ error: "Sorry, your password was incorrect. Please double-check your password." });
       }
       if (req.url === "/code") {
@@ -357,8 +364,24 @@ function loginSite(seen) {
         if (c === "123456") return json({ next: "/accounts/onetap/" }, true);
         return json({ error: "That code isn't right. Please check the code we sent you." });
       }
+      if (req.url === "/reset") {
+        const { u } = JSON.parse(body);
+        seen.push(`reset ${u}`);
+        if (u === "code.page") return json({ next: "/challenge/reset-code/" });
+        if (u === "link.page") return json({ error: "We sent an email to l***@gmail.com with a link to get back into your account." });
+        return json({ error: "No users found" });
+      }
+      if (req.url === "/reset-code") return json(JSON.parse(body).c === "654321" ? { next: "/accounts/password/reset/confirm/" } : { error: "That code isn't right." });
+      if (req.url === "/new-password") {
+        const { a, b } = JSON.parse(body);
+        seen.push(`new password ${a === b ? a : "mismatch"}`);
+        if (a.length < 6) return json({ error: "Create a password at least 6 characters long." });
+        // "fresh pass1" goes back to the login page; any other good one logs in.
+        return a === "fresh pass1" ? json({ next: "/accounts/login/" }) : json({ next: "/accounts/onetap/" }, true);
+      }
       if (req.url === "/saved" || req.url === "/robot") { res.writeHead(204); return res.end(); }
-      const page = pages[req.url];
+      const [route] = req.url.split("?");
+      const page = pages[route];
       res.writeHead(page ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
       res.end(page || "not found");
     });
@@ -370,9 +393,10 @@ async function loginSession(t) {
   const server = loginSite(seen);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  const session = await createInstagramDriver({ baseUrl: `http://127.0.0.1:${server.address().port}`, timing: FAST }).open(await launchChrome(t), { block: [] });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t), { block: [] });
   t.after(() => session.close());
-  return { session, seen };
+  return { session, seen, baseUrl };
 }
 
 test("login: types the username and password exactly, then a wrong password, a code check and Save", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
@@ -399,6 +423,26 @@ test("login: the right password logs in; a captcha waits for the owner's tap fro
   assert.ok(seen.includes("POST /robot"), "the tap lands where the owner tapped on the photo");
   assert.deepEqual(await session.login({ username: "new.page", password: "right pass@1" }), { status: "logged_in" });
   assert.ok(seen.includes("typed new.page / right pass@1") && seen.includes("POST /saved"));
+});
+
+test("forgot password: a code, then a new password (too short, then good), logged in and saved", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen } = await loginSession(t);
+  assert.deepEqual(await session.requestReset({ username: "ghost" }), { status: "no_account" });
+  assert.deepEqual(await session.requestReset({ username: "code.page" }), { status: "code_sent" });
+  assert.deepEqual(await session.enterCode({ code: "654321" }), { status: "new_password" });
+  assert.deepEqual(await session.setNewPassword({ password: "abc" }), { status: "weak_password" });
+  assert.deepEqual(await session.setNewPassword({ password: "good pass 7" }), { status: "logged_in" });
+  assert.ok(seen.includes("reset code.page") && seen.includes("new password good pass 7"), "both boxes get the same new password");
+  assert.ok(seen.includes("POST /saved"));
+});
+
+test("forgot password: a link from the email, a new password, then the login page logs in with it", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen, baseUrl } = await loginSession(t);
+  assert.deepEqual(await session.requestReset({ username: "link.page" }), { status: "link_sent" });
+  assert.deepEqual(await session.openLink({ url: `${baseUrl}/accounts/password/reset/confirm/?uidb36=x&token=y` }), { status: "new_password" });
+  assert.deepEqual(await session.setNewPassword({ password: "fresh pass1" }), { status: "login_page" });
+  assert.deepEqual(await session.login({ username: "link.page", password: "fresh pass1" }), { status: "logged_in" });
+  assert.ok(seen.includes("new password fresh pass1") && seen.includes("typed link.page / fresh pass1"));
 });
 
 async function serve(t, inbox) {
