@@ -1323,6 +1323,13 @@ async function loadDm() {
   clearTemporaryUnavailable();
   if (dmState.configured && !dmProfilesLoaded && currentView === "dm-create") void loadDmProfiles();
   if (dmState.configured && dmState.campaigns.length) void dmProfilesOnce().catch(() => {});
+  // A login still waiting on the server (e.g. after a reload): show it again,
+  // unless the box already shows that one.
+  const waitingLogin = dmState.login;
+  if (waitingLogin && $("account-result").dataset.browser !== waitingLogin.browser_id) {
+    $("account-new").open = true;
+    renderAccountResult(waitingLogin);
+  }
   void loadChecks().catch(() => {});
   void loadDmStats().catch(() => {});
   void loadFinder().catch(() => {});
@@ -1929,7 +1936,7 @@ const ACCOUNT_RESULTS = {
   already: "Is profile mein pehle se Instagram login hai. Neeche campaign bana sakte ho.",
   wrong_password: "Instagram ne username ya password galat bataya. Phone par check karke hi dobara try karo, baar baar try mat karo.",
   needs_check: "Instagram check maang raha hai (code, OTP ya captcha). Browser Use mein chal raha browser kholo (Browsers mein), check khud poora karo, phir “Ho gaya” dabao. 15 minute mein band ho jayega.",
-  waiting: "Abhi login nahi dikha. Check poora karke phir “Ho gaya” dabao.",
+  waiting: "Ek login abhi khula hai. Check poora karke “Ho gaya” dabao, ya band karna ho toh “Band karo”.",
   code: "Instagram ne code bheja hai (SMS, email ya app par). Wo code neeche daalo aur “Code bhejo” dabao.",
   link: "Instagram ne email/SMS par link bheja hai. Email kholo, link copy karo (button par long-press → Copy link) aur neeche “Link” mein paste karo.",
   new_password: "Ab naya password daalo (kam se kam 6 akshar, letters + number) aur “Password set karo” dabao.",
@@ -1946,6 +1953,7 @@ const ACCOUNT_RESULTS = {
 function renderAccountResult(data) {
   const box = $("account-result");
   box.hidden = false;
+  box.dataset.browser = data.status === "needs_check" && data.browser_id ? data.browser_id : "";
   const key = data.status === "logged_in" && data.already ? "already" : data.wrong_code ? "wrong_code" : data.no_code_box ? "no_code_box"
     : data.weak_password ? "weak_password" : data.no_password_box ? "no_password_box" : data.new_password ? "new_password"
     : data.waiting ? "waiting" : data.link ? "link" : data.timeout ? "timeout" : data.status === "needs_check" && data.code ? "code" : data.status;
