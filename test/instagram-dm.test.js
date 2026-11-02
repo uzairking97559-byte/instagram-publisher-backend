@@ -326,8 +326,16 @@ function loginSite(seen) {
     "if (d.next) location.href = d.next; else document.getElementById('err').textContent = d.error; });";
   const pages = {
     // Like Instagram's page, a hidden box comes before the real ones.
-    "/accounts/login/": html('<form id="f"><input name="decoy" type="text" style="display:none"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err" role="alert"></p>',
-      send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }")),
+    // Like Instagram's page: a hidden box before the real ones, a hidden submit
+    // input, and a Log in button that ignores a script's element.click() (only
+    // a real click counts). Enter in the password box logs in, except for the
+    // username "clicker", where only a real click on Log in works.
+    "/accounts/login/": html('<form id="f"><input name="decoy" type="text" style="display:none"><input name="username" type="text"><input name="password" type="password">' +
+      '<input type="submit" style="display:none"><div role="button" id="go">Log in</div></form><p id="err" role="alert"></p>',
+      send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }") +
+      "document.getElementById('go').addEventListener('click', (e) => { if (e.isTrusted) document.getElementById('f').requestSubmit(); });" +
+      "document.querySelector('input[name=password]').addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); " +
+      "if (document.querySelector('input[name=username]').value !== 'clicker') document.getElementById('f').requestSubmit(); });"),
     "/challenge/": html('<form id="c"><p>Enter the code we sent to your number</p><input name="verificationCode" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
       send("c", "/code", "{ c: e.target.verificationCode.value }")),
     "/challenge/robot/": html('<div id="robot" style="position:fixed;left:0;top:0;width:200px;height:100px">I\'m not a robot</div>',
@@ -430,12 +438,18 @@ test("login: the right password logs in; a captcha waits for the owner's tap fro
   assert.ok(seen.includes("typed new.page / right pass@1") && seen.includes("POST /saved"));
 });
 
+test("login: when Enter does nothing, Log in gets a real mouse click", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session, seen } = await loginSession(t);
+  assert.deepEqual(await session.login({ username: "clicker", password: "right pass@1" }), { status: "logged_in" });
+  assert.ok(seen.includes("typed clicker / right pass@1") && seen.includes("POST /saved"));
+});
+
 test("login: no answer from Instagram keeps the browser for the owner; \"try again soon\" says wait", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
   const { session } = await loginSession(t);
   const silent = await session.login({ username: "new.page", password: "silent me" });
   assert.deepEqual([silent.status, silent.timeout, silent.code], ["needs_check", true, false]);
-  assert.match(silent.detail, /^typed user=true password=true button=ok inputs=decoy:text:0,username:text:1,password:password:1 path=\/accounts\/login\//,
-    "the visible boxes held what was typed; the hidden one is left alone");
+  assert.match(silent.detail, /^typed user=true password=true button=ok pressed=click inputs=decoy:text:0,username:text:1,password:password:1,-:submit:0 path=\/accounts\/login\//,
+    "the visible boxes held what was typed (the hidden one is left alone); Enter, then a real click on Log in");
   assert.match(silent.text, /Log in/);
   const later = await session.login({ username: "new.page", password: "later me" });
   assert.deepEqual([later.status, later.text], ["try_later", "There was a problem logging you into Instagram. Please try again soon."]);
