@@ -339,6 +339,9 @@ function loginSite(seen) {
       "if (document.querySelector('input[name=username]').value !== 'clicker') document.getElementById('f').requestSubmit(); });"),
     "/challenge/": html('<form id="c"><p>Enter the code we sent to your number</p><input name="verificationCode" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
       send("c", "/code", "{ c: e.target.verificationCode.value }")),
+    "/auth_platform/codeentry/": html('<form id="e"><p>Check your WhatsApp messages</p><input type="text" name="x1"><div role="button" id="go2">Continue</div></form><p id="err"></p>',
+      "document.getElementById('go2').addEventListener('click', (e) => { if (e.isTrusted) document.getElementById('e').requestSubmit(); });" +
+      send("e", "/code", "{ c: e.target.x1.value }")),
     "/challenge/robot/": html('<div id="robot" style="position:fixed;left:0;top:0;width:200px;height:100px">I\'m not a robot</div>',
       "document.getElementById('robot').addEventListener('click', () => { fetch('/robot', { method: 'POST' }); });"),
     "/accounts/password/reset/": html('<form id="r"><p>Trouble logging in?</p><input name="cppEmailOrUsername" type="text"><button type="submit">Send login link</button></form><p id="err"></p>',
@@ -369,6 +372,7 @@ function loginSite(seen) {
         if (p === "fresh pass1") return json({ next: "/accounts/onetap/" }, true);
         if (p === "silent me") return json({});
         if (p === "later me") return json({ error: "There was a problem logging you into Instagram. Please try again soon." });
+        if (p === "codeentry me") return json({ next: "/auth_platform/codeentry/" });
         if (p === "hindi wrong") return json({ error: "आपने जो लॉग इन जानकारी डाली है वह गलत है. अपना सही अकाउंट ढूँढें और लॉग इन करें." });
         return json({ error: "Sorry, your password was incorrect. Please double-check your password." });
       }
@@ -439,6 +443,12 @@ test("login: the right password logs in; a captcha waits for the owner's tap fro
   assert.ok(seen.includes("POST /robot"), "the tap lands where the owner tapped on the photo");
   assert.deepEqual(await session.login({ username: "new.page", password: "right pass@1" }), { status: "logged_in" });
   assert.ok(seen.includes("typed new.page / right pass@1") && seen.includes("POST /saved"));
+});
+
+test("login: Instagram's code page (/auth_platform/codeentry/) with a plain text box takes the code", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { session } = await loginSession(t);
+  assert.deepEqual(await session.login({ username: "new.page", password: "codeentry me" }), { status: "needs_check", text: "code", code: true });
+  assert.deepEqual(await session.enterCode({ code: "123456" }), { status: "logged_in" });
 });
 
 test("login: when Enter does nothing, Log in gets a real mouse click", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
