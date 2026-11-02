@@ -325,7 +325,8 @@ function loginSite(seen) {
     `const r = await fetch('${url}', { method: 'POST', body: JSON.stringify(${field}) }); const d = await r.json(); ` +
     "if (d.next) location.href = d.next; else document.getElementById('err').textContent = d.error; });";
   const pages = {
-    "/accounts/login/": html('<form id="f"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err" role="alert"></p>',
+    // Like Instagram's page, a hidden box comes before the real ones.
+    "/accounts/login/": html('<form id="f"><input name="decoy" type="text" style="display:none"><input name="username" type="text"><input name="password" type="password"><button type="submit">Log in</button></form><p id="err" role="alert"></p>',
       send("f", "/try", "{ u: e.target.username.value, p: e.target.password.value }")),
     "/challenge/": html('<form id="c"><p>Enter the code we sent to your number</p><input name="verificationCode" inputmode="numeric"><button type="submit">Confirm</button></form><p id="err"></p>',
       send("c", "/code", "{ c: e.target.verificationCode.value }")),
@@ -433,7 +434,8 @@ test("login: no answer from Instagram keeps the browser for the owner; \"try aga
   const { session } = await loginSession(t);
   const silent = await session.login({ username: "new.page", password: "silent me" });
   assert.deepEqual([silent.status, silent.timeout, silent.code], ["needs_check", true, false]);
-  assert.match(silent.detail, /^typed user=true password=true button=ok path=\/accounts\/login\//, "the boxes held what was typed");
+  assert.match(silent.detail, /^typed user=true password=true button=ok inputs=decoy:text:0,username:text:1,password:password:1 path=\/accounts\/login\//,
+    "the visible boxes held what was typed; the hidden one is left alone");
   assert.match(silent.text, /Log in/);
   const later = await session.login({ username: "new.page", password: "later me" });
   assert.deepEqual([later.status, later.text], ["try_later", "There was a problem logging you into Instagram. Please try again soon."]);
