@@ -269,6 +269,9 @@ test("a new account: the website logs it in to a Browser Use profile and never k
   assert.equal(fake.browsers.get(id).status, "active");
   await tick();
   assert.equal(fake.browsers.get(id).status, "active", "the worker leaves a login that waits for its check");
+  assert.deepEqual((await h.request("/api/dm", { cookie })).data.login,
+    { status: "needs_check", profile_id: result.data.profile_id, profile_name: "DM 4", browser_id: id, live_url: null, waiting: true },
+    "after a reload the website can show the waiting login again");
   assert.equal((await add({ name: "DM 5", username: "y", password: PASSWORD })).data.error, "login_busy");
   const screen = await h.requestRaw(`/api/dm/accounts/${id}/screen`, { method: "GET", cookie });
   assert.deepEqual([screen.status, screen.response.headers.get("content-type")], [200, "image/jpeg"]);
