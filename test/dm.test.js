@@ -681,12 +681,17 @@ test("replies: read per account between DMs, answered from the website, checked 
 });
 
 test("auto-jawab: the owner's fixed answer goes by itself, once per person; a later message is the owner's", async (t) => {
-  const { h, driver, cookie, advance, create, start, tick } = await setup(t);
+  const { h, driver, clock, cookie, advance, create, start, tick } = await setup(t);
   const id = (await create({ usernames: "one\ntwo\nthree", message: "Hi {username}, want details?" })).data.campaign.id;
   const replies = async () => (await h.request("/api/dm/replies", { cookie })).data;
   const auto = (body) => h.request("/api/dm/auto", { method: "POST", cookie, body });
-  const check = async () => { await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } }); await tick(); };
+  // The request starts the worker itself; two more runs make sure the check
+  // and then the answers it queued are done, whichever run did them.
+  const check = async () => { await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } }); await tick(); await tick(); };
   const said = (username, text) => ({ key: `${username}|${text}`, name: username, username, thread: `/direct/t/${username}/`, text, matched: true });
+  const wrote = async (username, text) => (await h.db.query(
+    "INSERT INTO dm_replies(profile_id,thread,username,name,row_key,text,received_at) VALUES($1,$2,$3,$3,$4,$5,$6) RETURNING id::text AS id",
+    [PROFILE, `/direct/t/${username}/`, username, `${username}|${text}`, text, clock.now])).rows[0].id;
   driver.inbox.replies = [said("one", "Yes please")];
 
   // Off by default: the DM, then the inbox, and nothing goes by itself.
@@ -712,7 +717,6 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   // new writes: they get it, after the check that found them.
   driver.inbox.replies = [said("one", "How much?"), said("two", "Kitna milega?")];
   await check();
-  await tick();
   assert.deepEqual(driver.answers.map((item) => item.username), ["one", "two"]);
   assert.equal(driver.answers[1].message, "Hi two! Saari details ke liye Telegram par message karo: t.me/example");
   data = await replies();
@@ -722,10 +726,11 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   assert.deepEqual([totals.answers_sent, totals.auto_sent], [0, 2], "auto answers are counted apart from the owner's");
 
   // Off: an auto answer not sent yet is dropped; the message is kept.
-  driver.inbox.replies = [said("three", "Hello")];
-  await check();
+  const three = await wrote("three", "Hello");
+  await h.db.query("INSERT INTO dm_outbox(reply_id,profile_id,message,auto) VALUES($1,$2,'Hi three!',TRUE)", [three, PROFILE]);
   const off = await auto({ on: false, message: "" });
-  assert.deepEqual([off.data.auto.on, off.data.auto.message], [false, text]);
+  assert.deepEqual([off.data.auto.on, off.data.auto.message, off.data.queued], [false, text, 0]);
+  assert.equal((await h.db.query("SELECT COUNT(*)::int AS count FROM dm_outbox WHERE reply_id=$1", [three])).rows[0].count, 0);
   await tick();
   assert.deepEqual(driver.answers.map((item) => item.username), ["one", "two"]);
 
@@ -736,15 +741,12 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   assert.deepEqual(driver.answers.map((item) => [item.username, item.message]).slice(2), [["three", "Telegram: t.me/example"]]);
 
   // Not on an account Instagram stopped, nor while an answer of the owner's waits.
-  driver.inbox.replies = [said("four", "Hi")];
-  await check();
-  await h.db.query("DELETE FROM dm_outbox WHERE auto AND status='pending'");
+  const four = await wrote("four", "Hi");
   await h.db.query("UPDATE dm_inboxes SET check_status='logged_out' WHERE profile_id=$1", [PROFILE]);
   assert.equal((await auto({ on: true, message: "Telegram: t.me/example" })).data.queued, 0);
   await tick();
   await h.db.query("UPDATE dm_inboxes SET check_status='ok' WHERE profile_id=$1", [PROFILE]);
-  const four = (await replies()).replies.find((reply) => reply.username === "four");
-  await h.db.query("INSERT INTO dm_outbox(reply_id,profile_id,message) VALUES($1,$2,'Typed by the owner')", [four.id, PROFILE]);
+  await h.db.query("INSERT INTO dm_outbox(reply_id,profile_id,message) VALUES($1,$2,'Typed by the owner')", [four, PROFILE]);
   assert.equal((await auto({ on: true, message: "Telegram: t.me/example" })).data.queued, 0);
   await tick();
   assert.deepEqual(driver.answers.map((item) => item.message).slice(3), ["Typed by the owner"]);
