@@ -61,7 +61,8 @@ function fakeDriver(results = {}) {
   const answers = [];
   const inbox = { account: "aiglow.artlab", replies: [], blocked: null, answerResults: {} };
   // A new account's login: what login and enterCode answer, what was typed.
-  const account = { result: { status: "logged_in" }, codeResult: { status: "logged_in" }, loggedIn: false, typed: [], codes: [], options: [], taps: [] };
+  const account = { result: { status: "logged_in" }, codeResult: { status: "logged_in" }, loggedIn: false, typed: [], codes: [], options: [], taps: [],
+    resetResult: { status: "code_sent" }, linkResult: { status: "new_password" }, newPasswordResults: [], resets: [], links: [], newPasswords: 0 };
   return {
     sent, opened, results, checks, answers, inbox, account,
     async open(cdpUrl, options) {
@@ -94,6 +95,9 @@ function fakeDriver(results = {}) {
         },
         login: async ({ username, password }) => { account.typed.push([username, password]); return account.result; },
         enterCode: async ({ code }) => { account.codes.push(code); return account.codeResult; },
+        requestReset: async ({ username }) => { account.resets.push(username); return account.resetResult; },
+        openLink: async ({ url }) => { account.links.push(url); return account.linkResult; },
+        setNewPassword: async () => { account.newPasswords++; return account.newPasswordResults.shift() || { status: "logged_in" }; },
         loggedIn: async () => account.loggedIn,
         screenshot: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
         tap: async (point) => { account.taps.push(point); },
@@ -299,6 +303,51 @@ test("a new account: the website logs it in to a Browser Use profile and never k
 
   assert.doesNotMatch(JSON.stringify(h.logs), /s3cret|pass@word|123456/, "neither the password nor the code is logged");
   assert.equal((await h.request("/api/dm/accounts", { method: "POST", body: { name: "x", username: "y", password: "z" } })).status, 401, "owner only");
+});
+
+test("forgot password: a code or an email link, then a new password; an account can log in to its own profile again", async (t) => {
+  const { h, driver, cookie, create, campaign, start } = await setup(t);
+  const reset = (body) => h.request("/api/dm/accounts/reset", { method: "POST", cookie, body });
+  const step = (id, what, body) => h.request(`/api/dm/accounts/${id}/${what}`, { method: "POST", cookie, body });
+
+  // A code, then the new-password page; Instagram then shows its login page, so it logs in with the new password.
+  let result = await reset({ name: "DM 7", username: "seven.page" });
+  assert.deepEqual([result.data.status, result.data.code, result.data.reset], ["needs_check", true, true]);
+  let id = result.data.browser_id;
+  driver.account.codeResult = { status: "new_password" };
+  result = await step(id, "code", { code: "654321" });
+  assert.deepEqual([result.data.status, result.data.new_password], ["needs_check", true]);
+  assert.equal((await step(id, "password", { password: "abc" })).data.error, "invalid_new_password");
+  driver.account.newPasswordResults.push({ status: "weak_password" }, { status: "login_page" });
+  result = await step(id, "password", { password: "simple1" });
+  assert.deepEqual([result.data.status, result.data.weak_password, result.data.new_password], ["needs_check", true, true]);
+  driver.account.result = { status: "logged_in" };
+  assert.equal((await step(id, "password", { password: "fresh pass1" })).data.status, "logged_in");
+  assert.deepEqual(driver.account.typed.at(-1), ["seven.page", "fresh pass1"], "logs in with the new password");
+
+  // A link by email: only Instagram's own links are opened.
+  driver.account.resetResult = { status: "link_sent" };
+  result = await reset({ name: "DM 8", username: "eight.page" });
+  assert.deepEqual([result.data.status, result.data.link], ["needs_check", true]);
+  id = result.data.browser_id;
+  assert.equal((await step(id, "link", { url: "https://evil.example/accounts/password/reset/" })).data.error, "invalid_link");
+  assert.equal((await step(id, "link", { url: "http://instagram.com/x" })).data.error, "invalid_link");
+  result = await step(id, "link", { url: "https://instagram.com/accounts/password/reset/confirm/?uidb36=a&token=b" });
+  assert.equal(result.data.new_password, true);
+  assert.equal((await step(id, "password", { password: "another one2" })).data.status, "logged_in");
+  driver.account.resetResult = { status: "no_account" };
+  assert.equal((await reset({ name: "DM 9", username: "ghost.page" })).data.status, "no_account");
+
+  // A profile with a campaign: its own account may log in again (paused), another may not.
+  const created = await create();
+  await h.db.query("INSERT INTO dm_inboxes(profile_id,account) VALUES($1,'aiglow.artlab') ON CONFLICT (profile_id) DO UPDATE SET account=EXCLUDED.account", [PROFILE]);
+  const add = (body) => h.request("/api/dm/accounts", { method: "POST", cookie, body });
+  assert.equal((await add({ name: "Personal Profile", username: "other.page", password: "x" })).data.error, "account_mismatch");
+  assert.equal((await add({ name: "Personal Profile", username: "AIGLOW.artlab", password: "new one" })).data.status, "logged_in");
+  await start(created.data.campaign.id);
+  assert.equal((await campaign(created.data.campaign.id)).campaign.status, "running");
+  assert.equal((await add({ name: "Personal Profile", username: "aiglow.artlab", password: "new one" })).data.error, "profile_running");
+  assert.doesNotMatch(JSON.stringify(h.logs), /fresh pass1|another one2|simple1|654321|token=b/, "no password, code or link in the logs");
 });
 
 test("the worker sends one message per gap, stops after a test run and reports the cost", async (t) => {
