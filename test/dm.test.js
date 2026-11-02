@@ -680,6 +680,76 @@ test("replies: read per account between DMs, answered from the website, checked 
   assert.equal([...fake.browsers.values()].every((item) => item.status === "stopped"), true);
 });
 
+test("auto-jawab: the owner's fixed answer goes by itself, once per person; a later message is the owner's", async (t) => {
+  const { h, driver, cookie, advance, create, start, tick } = await setup(t);
+  const id = (await create({ usernames: "one\ntwo\nthree", message: "Hi {username}, want details?" })).data.campaign.id;
+  const replies = async () => (await h.request("/api/dm/replies", { cookie })).data;
+  const auto = (body) => h.request("/api/dm/auto", { method: "POST", cookie, body });
+  const check = async () => { await h.request("/api/dm/replies/check", { method: "POST", cookie, body: { profile_id: PROFILE } }); await tick(); };
+  const said = (username, text) => ({ key: `${username}|${text}`, name: username, username, thread: `/direct/t/${username}/`, text, matched: true });
+  driver.inbox.replies = [said("one", "Yes please")];
+
+  // Off by default: the DM, then the inbox, and nothing goes by itself.
+  await start(id);
+  await tick();
+  let data = await replies();
+  assert.deepEqual(data.auto, { on: false, message: "", updated_at: null });
+  assert.deepEqual([data.replies.length, data.replies[0].answers.length], [1, 0]);
+
+  // On needs a message; the new reply already there gets it, its name filled in.
+  assert.equal((await auto({ on: true, message: "   " })).data.error, "invalid_auto_answer");
+  assert.equal((await auto({ on: true, message: "x".repeat(1001) })).data.error, "invalid_auto_answer");
+  const text = "Hi {username}! Saari details ke liye Telegram par message karo: t.me/example";
+  const on = await auto({ on: true, message: text });
+  assert.deepEqual([on.status, on.data.queued, on.data.auto.on, on.data.auto.message], [200, 1, true, text]);
+  await tick();
+  assert.deepEqual(driver.answers.map((item) => [item.username, item.message]), [["one", "Hi one! Saari details ke liye Telegram par message karo: t.me/example"]]);
+  data = await replies();
+  assert.equal(data.replies[0].status, "answered");
+  assert.deepEqual(data.replies[0].answers.map((item) => [item.auto, item.status]), [[true, "sent"]]);
+
+  // They write again: no second auto answer, it waits for the owner. Someone
+  // new writes: they get it, after the check that found them.
+  driver.inbox.replies = [said("one", "How much?"), said("two", "Kitna milega?")];
+  await check();
+  await tick();
+  assert.deepEqual(driver.answers.map((item) => item.username), ["one", "two"]);
+  assert.equal(driver.answers[1].message, "Hi two! Saari details ke liye Telegram par message karo: t.me/example");
+  data = await replies();
+  assert.deepEqual(Object.fromEntries(data.replies.map((reply) => [reply.username, reply.status])), { one: "new", two: "answered" });
+  advance(1000);
+  const totals = (await h.request("/api/dm/stats?period=1", { cookie })).data.totals;
+  assert.deepEqual([totals.answers_sent, totals.auto_sent], [0, 2], "auto answers are counted apart from the owner's");
+
+  // Off: an auto answer not sent yet is dropped; the message is kept.
+  driver.inbox.replies = [said("three", "Hello")];
+  await check();
+  const off = await auto({ on: false, message: "" });
+  assert.deepEqual([off.data.auto.on, off.data.auto.message], [false, text]);
+  await tick();
+  assert.deepEqual(driver.answers.map((item) => item.username), ["one", "two"]);
+
+  // On again, with a new message: only the one who never got it.
+  const again = await auto({ on: true, message: "Telegram: t.me/example" });
+  assert.equal(again.data.queued, 1);
+  await tick();
+  assert.deepEqual(driver.answers.map((item) => [item.username, item.message]).slice(2), [["three", "Telegram: t.me/example"]]);
+
+  // Not on an account Instagram stopped, nor while an answer of the owner's waits.
+  driver.inbox.replies = [said("four", "Hi")];
+  await check();
+  await h.db.query("DELETE FROM dm_outbox WHERE auto AND status='pending'");
+  await h.db.query("UPDATE dm_inboxes SET check_status='logged_out' WHERE profile_id=$1", [PROFILE]);
+  assert.equal((await auto({ on: true, message: "Telegram: t.me/example" })).data.queued, 0);
+  await tick();
+  await h.db.query("UPDATE dm_inboxes SET check_status='ok' WHERE profile_id=$1", [PROFILE]);
+  const four = (await replies()).replies.find((reply) => reply.username === "four");
+  await h.db.query("INSERT INTO dm_outbox(reply_id,profile_id,message) VALUES($1,$2,'Typed by the owner')", [four.id, PROFILE]);
+  assert.equal((await auto({ on: true, message: "Telegram: t.me/example" })).data.queued, 0);
+  await tick();
+  assert.deepEqual(driver.answers.map((item) => item.message).slice(3), ["Typed by the owner"]);
+});
+
 test("inboxes are also read at 16:00, 19:00 and 22:00 India time for accounts that sent DMs lately", async (t) => {
   const { h, fake, driver, clock, create, start, tick } = await setup(t);
   const at = (iso) => { clock.now = new Date(iso); };

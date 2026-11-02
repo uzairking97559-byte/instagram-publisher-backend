@@ -177,6 +177,21 @@
               <button id="telegram-unlink" class="quiet small" type="button" hidden>Hatao</button>
             </div>
           </div>
+          <details id="auto-panel" class="add-account" hidden>
+            <summary><span class="plus" aria-hidden="true">+</span>Auto-jawab <span id="auto-state" class="count">OFF</span></summary>
+            <div class="dm-form">
+              <p class="hint">ON karne par jo bhi DM ka jawab dega, use yeh message apne aap usi account se chala jayega. Har insaan ko sirf ek baar. Reply Telegram par aayega aur yahan “Sab” mein dikhega; woh dobara likhe to “Naye” mein aayega, tab aap khud jawab do. <strong>{username}</strong> likho to wahan creator ka naam aayega.</p>
+              <p class="hint">Dhyan do: message mein link ho to naye account par Instagram warning ka thoda risk hai. Warning aate hi us account par sab apne aap ruk jayega.</p>
+              <form id="auto-form">
+                <label for="auto-text">Message</label>
+                <textarea id="auto-text" rows="4" maxlength="1000" placeholder="Jaise: Saari details ke liye is Telegram par message karo 👉 t.me/…"></textarea>
+                <div class="dm-actions">
+                  <button id="auto-on" class="primary" type="submit">Save karke ON karo</button>
+                  <button id="auto-off" class="quiet" type="button" hidden>OFF karo</button>
+                </div>
+              </form>
+            </div>
+          </details>
           <p id="replies-empty" class="empty" hidden>Pehle ek DM campaign chalao. Jinhe DM gaya, unke reply yahan dikhenge.</p>
           <div id="replies-body" hidden>
             <div id="replies-accounts" class="reply-tabs" role="tablist" aria-label="Instagram account"></div>

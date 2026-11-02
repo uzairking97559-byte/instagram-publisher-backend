@@ -511,3 +511,13 @@ CREATE TABLE IF NOT EXISTS creator_bot_settings (
   logo_kind TEXT CHECK (logo_kind IS NULL OR logo_kind IN ('photo', 'document')),
   guide_file_id TEXT
 );
+-- Auto-jawab (lib/dm.js): one fixed answer the worker sends by itself to each
+-- person who writes back, once. auto marks those answers in the outbox.
+CREATE TABLE IF NOT EXISTS dm_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  auto_on BOOLEAN NOT NULL DEFAULT FALSE,
+  auto_message TEXT,
+  auto_updated_at TIMESTAMPTZ
+);
+ALTER TABLE dm_outbox ADD COLUMN IF NOT EXISTS auto BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS dm_outbox_auto_idx ON dm_outbox(reply_id) WHERE auto;
