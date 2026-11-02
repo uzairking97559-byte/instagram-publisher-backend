@@ -1540,7 +1540,7 @@ function dmAccountSelect(campaign) {
     for (const profile of profiles) {
       if (profile.id === campaign.profile_id) continue;
       const finder = finders.has(profile.id) || /finder/i.test(profile.name || "");
-      const option = element("option", `${profile.name || "Profile"} · ${profile.id.slice(0, 8)}${finder ? " · Finder" : ""}`);
+      const option = element("option", `${profile.name || "Profile"} · ${profile.account ? `@${profile.account}` : profile.id.slice(0, 8)}${finder ? " · Finder" : ""}`);
       option.value = profile.id; option.dataset.name = profile.name || ""; option.disabled = finder;
       select.append(option);
     }
@@ -1732,6 +1732,55 @@ $("auto-form").addEventListener("submit", async (event) => {
   await saveAuto({ on: true, message });
 });
 $("auto-off").addEventListener("click", () => saveAuto({ on: false, message: $("auto-text").value.trim() }));
+// ---- Account scan: which Instagram account each profile is logged in to ----
+let scanState = null;
+let scanTimer = null;
+const SCAN_STATUS = {
+  waiting: "Line mein hai…", checking: "Dekh rahe hain…", logged_out: "Login nahi hai",
+  challenge: "Instagram check maang raha hai", action_blocked: "Instagram ne rok rakha hai",
+  busy: "Finder chal raha hai, baad mein scan karo", not_found: "Browser Use mein profile nahi mila", failed: "Dekh nahi paye, dobara scan karo"
+};
+function renderScan() {
+  const list = $("scan-list");
+  list.replaceChildren();
+  const scans = scanState?.scans || [];
+  $("scan-start").disabled = !scanState?.configured || Boolean(scanState?.scanning);
+  $("scan-start").textContent = scanState?.scanning ? "Scan chal raha hai…" : scans.length ? "Dobara scan karo" : "Sab profile scan karo";
+  $("scan-status").textContent = scanState?.scanning ? "Ek profile ≈ 30 second. Page khula rakho, list apne aap update hogi." : "";
+  for (const item of scans) {
+    const row = element("div", undefined, "template-row");
+    const text = element("div");
+    text.append(element("strong", `${item.name || "Profile"} · ${item.profile_id.slice(0, 8)}`));
+    const found = item.status === "ok" ? (item.account ? `@${item.account} ✓` : "Login hai, par username nahi dikha") : SCAN_STATUS[item.status] || item.status;
+    text.append(element("p", item.checked_at && item.status !== "waiting" && item.status !== "checking" ? `${found} · ${formatWhen(item.checked_at)}` : found));
+    row.append(text);
+    list.append(row);
+  }
+  if (scanState?.scanning && !scanTimer) {
+    scanTimer = setInterval(async () => {
+      try { scanState = await api("/api/dm/scan"); } catch { return; }
+      renderScan();
+    }, 8000);
+  }
+  if (!scanState?.scanning && scanTimer) {
+    clearInterval(scanTimer); scanTimer = null;
+    dmProfileList = null;
+    void loadDmProfiles().catch(() => {});
+    if (replyState) void loadReplies().catch(() => {});
+  }
+}
+$("scan-panel").addEventListener("toggle", async () => {
+  if (!$("scan-panel").open) return;
+  try { scanState = await api("/api/dm/scan"); renderScan(); } catch (error) { explain(error); }
+});
+$("scan-start").addEventListener("click", async () => {
+  let count = "sab";
+  try { count = String((await dmProfilesOnce()).length); } catch { /* the server checks again */ }
+  if (!confirm(`${count} profile ek-ek karke khulenge (har profile ≈ ₹2–3). Koi DM nahi jayega. Scan karein?`)) return;
+  $("scan-start").disabled = true;
+  try { scanState = await api("/api/dm/scan", { method: "POST", body: "{}" }); renderScan(); }
+  catch (error) { explain(error); $("scan-start").disabled = false; }
+});
 function renderReplies() {
   renderToday();
   renderAuto();
@@ -1897,7 +1946,7 @@ async function loadDmProfiles() {
   select.replaceChildren(element("option", profiles.length ? "Profile chuno" : failed ? "Profiles load nahi hui · ID khud daalo" : "Koi profile nahi mili · ID khud daalo"));
   select.firstChild.value = "";
   for (const profile of profiles) {
-    const option = element("option", `${profile.name || "Profile"} · ${profile.id.slice(0, 8)}`);
+    const option = element("option", `${profile.name || "Profile"} · ${profile.account ? `@${profile.account}` : profile.id.slice(0, 8)}`);
     option.value = profile.id; option.dataset.name = profile.name || "";
     select.append(option);
   }
