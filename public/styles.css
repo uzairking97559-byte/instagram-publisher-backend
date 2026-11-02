@@ -765,3 +765,6 @@ footer a { color: var(--marigold-text); }
 .wwm-row { flex-wrap: wrap; }
 .wwm-row small { color: var(--haze); }
 .wwm-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* New account login: what Instagram shows when it asks for a check. */
+.login-screen { cursor: crosshair; display: block; width: 100%; max-width: 640px; height: auto; margin: 10px 0; border-radius: 10px; border: 1px solid var(--seam); }

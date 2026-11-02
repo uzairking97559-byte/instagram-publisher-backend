@@ -17,12 +17,18 @@ const NOON_IST = "2026-10-18T06:30:00.000Z";
 function browserUseFake() {
   const browsers = new Map();
   const calls = [];
+  const profiles = [{ id: PROFILE, name: "Personal Profile", lastUsedAt: null }];
   const run = async (url, init = {}) => {
     assert.equal(url.hostname, "api.browser-use.com", "only Browser Use is called");
     calls.push(`${init.method || "GET"} ${url.pathname}`);
     if (init.headers?.["X-Browser-Use-API-Key"] !== KEY) return json({ detail: "invalid key" }, 401);
+    if (url.pathname === "/api/v4/profiles" && init.method === "POST") {
+      const profile = { id: crypto.randomUUID(), name: JSON.parse(init.body).name, lastUsedAt: null };
+      profiles.push(profile);
+      return json({ ...profile, userId: null, createdAt: "2026-11-02T10:00:00Z", updatedAt: "2026-11-02T10:00:00Z", cookieDomains: null }, 201);
+    }
     if (url.pathname === "/api/v4/profiles") {
-      return json({ items: [{ id: PROFILE, name: "Personal Profile", lastUsedAt: null }, { id: "not-a-uuid", name: "x" }] });
+      return json({ items: [...profiles, { id: "not-a-uuid", name: "x" }] });
     }
     if (url.pathname === "/api/v4/browsers" && init.method === "POST") {
       const id = crypto.randomUUID();
@@ -42,7 +48,7 @@ function browserUseFake() {
     }
     throw new Error(`Unexpected Browser Use route ${url.pathname}`);
   };
-  return { run, browsers, calls };
+  return { run, browsers, calls, profiles };
 }
 
 // Stands in for lib/instagram-dm.js: answers per username, "sent" by default.
@@ -54,10 +60,13 @@ function fakeDriver(results = {}) {
   const checks = [];
   const answers = [];
   const inbox = { account: "aiglow.artlab", replies: [], blocked: null, answerResults: {} };
+  // A new account's login: what login and enterCode answer, what was typed.
+  const account = { result: { status: "logged_in" }, codeResult: { status: "logged_in" }, loggedIn: false, typed: [], codes: [], options: [], taps: [] };
   return {
-    sent, opened, results, checks, answers, inbox,
-    async open(cdpUrl) {
+    sent, opened, results, checks, answers, inbox, account,
+    async open(cdpUrl, options) {
       opened.push(cdpUrl);
+      account.options.push(options);
       let alive = true;
       return {
         alive: () => alive,
@@ -83,6 +92,12 @@ function fakeDriver(results = {}) {
           answers.push(item);
           return inbox.answerResults[item.message] || { status: "sent" };
         },
+        login: async ({ username, password }) => { account.typed.push([username, password]); return account.result; },
+        enterCode: async ({ code }) => { account.codes.push(code); return account.codeResult; },
+        loggedIn: async () => account.loggedIn,
+        screenshot: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+        tap: async (point) => { account.taps.push(point); },
+        type: async (text) => { account.taps.push({ text }); },
         idle: async () => {},
         close: () => { alive = false; }
       };
@@ -215,6 +230,75 @@ test("after three skips in a row the next DM waits a normal gap, not 15 seconds"
   advance(15000);
   await tick();
   assert.equal(driver.sent.length, 3, "nothing before the gap");
+});
+
+test("a new account: the website logs it in to a Browser Use profile and never keeps the password", async (t) => {
+  const { h, fake, driver, cookie, create, tick } = await setup(t);
+  const PASSWORD = "s3cret pass@word";
+  const add = (body) => h.request("/api/dm/accounts", { method: "POST", cookie, body });
+  const stopped = (id) => fake.browsers.get(id).status === "stopped";
+  assert.equal((await add({ name: "DM 3", username: "new.page" })).data.error, "invalid_account_login");
+  assert.equal((await add({ name: "DM 3", username: "two words", password: PASSWORD })).data.error, "invalid_account_login");
+  // A profile that a campaign uses is an Instagram account already.
+  await create();
+  assert.equal((await add({ name: "personal profile", username: "x", password: PASSWORD })).data.error, "profile_in_use");
+
+  let result = await add({ name: "DM 3", username: "@new.page", password: PASSWORD });
+  assert.equal(result.status, 200);
+  assert.deepEqual([result.data.status, result.data.profile_name], ["logged_in", "DM 3"]);
+  assert.deepEqual(driver.account.typed, [["new.page", PASSWORD]]);
+  assert.deepEqual(driver.account.options.at(-1), { block: [] }, "a login browser loads everything, so a check shows");
+  assert.equal(fake.profiles.find((item) => item.name === "DM 3").id, result.data.profile_id);
+  assert.ok([...fake.browsers.keys()].every(stopped), "the browser stops, which saves the login");
+  // The same name again uses that profile, not a new one.
+  driver.account.result = { status: "wrong_password" };
+  result = await add({ name: "dm 3", username: "new.page", password: "typo" });
+  assert.deepEqual([result.data.status, result.data.profile_id], ["wrong_password", fake.profiles.find((item) => item.name === "DM 3").id]);
+  assert.equal(fake.profiles.filter((item) => item.name === "DM 3").length, 1);
+  assert.ok([...fake.browsers.keys()].every(stopped));
+
+  // Instagram asks for a code: the browser waits, the owner sends the code.
+  driver.account.result = { status: "needs_check", text: "code", code: true };
+  result = await add({ name: "DM 4", username: "other.page", password: PASSWORD });
+  assert.deepEqual([result.data.status, result.data.code], ["needs_check", true]);
+  const id = result.data.browser_id;
+  assert.equal(fake.browsers.get(id).status, "active");
+  await tick();
+  assert.equal(fake.browsers.get(id).status, "active", "the worker leaves a login that waits for its check");
+  assert.equal((await add({ name: "DM 5", username: "y", password: PASSWORD })).data.error, "login_busy");
+  const screen = await h.requestRaw(`/api/dm/accounts/${id}/screen`, { method: "GET", cookie });
+  assert.deepEqual([screen.status, screen.response.headers.get("content-type")], [200, "image/jpeg"]);
+  const code = (body) => h.request(`/api/dm/accounts/${id}/code`, { method: "POST", cookie, body });
+  assert.equal((await code({ code: "12ab" })).data.error, "invalid_code");
+  driver.account.codeResult = { status: "wrong_code" };
+  result = await code({ code: "000000" });
+  assert.deepEqual([result.data.status, result.data.wrong_code, result.data.code], ["needs_check", true, true]);
+  driver.account.codeResult = { status: "logged_in" };
+  assert.equal((await code({ code: "123 456" })).data.status, "logged_in");
+  assert.deepEqual(driver.account.codes, ["000000", "123456"]);
+  assert.ok(stopped(id));
+  assert.equal((await h.request(`/api/dm/accounts/${id}/done`, { method: "POST", cookie, body: {} })).data.error, "login_not_found");
+
+  // A captcha: the owner does it in the live view, then "Ho gaya" (or "Band karo").
+  driver.account.result = { status: "needs_check", text: "captcha", code: false };
+  const captcha = (await add({ name: "DM 5", username: "third.page", password: PASSWORD })).data.browser_id;
+  const input = (body) => h.request(`/api/dm/accounts/${captcha}/input`, { method: "POST", cookie, body });
+  assert.equal((await input({ x: 1.5, y: 0.2 })).data.error, "invalid_input");
+  assert.equal((await input({ x: 0.25, y: 0.5 })).data.status, "needs_check");
+  assert.equal((await input({ text: "bus" })).data.status, "needs_check");
+  assert.deepEqual(driver.account.taps, [{ x: 0.25, y: 0.5 }, { text: "bus" }], "the owner's tap and typing reach the browser");
+  const done = (body) => h.request(`/api/dm/accounts/${captcha}/done`, { method: "POST", cookie, body });
+  assert.deepEqual([(await done({})).data.status, (await done({})).data.waiting], ["needs_check", true], "not logged in yet: it keeps waiting");
+  driver.account.loggedIn = true;
+  assert.equal((await done({})).data.status, "logged_in");
+  assert.ok(stopped(captcha));
+  driver.account.loggedIn = false;
+  const cancelled = (await add({ name: "DM 6", username: "fourth.page", password: PASSWORD })).data.browser_id;
+  assert.equal((await h.request(`/api/dm/accounts/${cancelled}/done`, { method: "POST", cookie, body: { cancel: true } })).data.status, "cancelled");
+  assert.ok(stopped(cancelled));
+
+  assert.doesNotMatch(JSON.stringify(h.logs), /s3cret|pass@word|123456/, "neither the password nor the code is logged");
+  assert.equal((await h.request("/api/dm/accounts", { method: "POST", body: { name: "x", username: "y", password: "z" } })).status, 401, "owner only");
 });
 
 test("the worker sends one message per gap, stops after a test run and reports the cost", async (t) => {

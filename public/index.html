@@ -229,6 +229,20 @@
           <div class="view-head">
             <div><h2>Naya DM campaign</h2><p class="muted">Save karne se bhejna shuru nahi hota. Card pe pehle “Pehle 5 (test)” chalao, phir baaki ke liye Start.</p></div>
           </div>
+          <details id="account-new" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Naya Instagram account jodo (login website karegi)</summary>
+            <form id="account-form" class="dm-form" autocomplete="off">
+              <p class="hint">Website Browser Use mein profile banakar India proxy se Instagram login karegi. Password kahin save nahi hota. Har try ≈ ₹2–3. Ek profile mein ek hi account.</p>
+              <label for="account-name">Profile ka naam</label>
+              <input id="account-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: DM 3">
+              <label for="account-username">Instagram username</label>
+              <input id="account-username" type="text" maxlength="100" required autocomplete="off" autocapitalize="none" spellcheck="false">
+              <label for="account-password">Instagram password</label>
+              <input id="account-password" type="password" maxlength="256" required autocomplete="new-password">
+              <button id="account-save" class="primary" type="submit">Login karo</button>
+              <div id="account-result" class="dm-note" hidden></div>
+            </form>
+          </details>
           <form id="dm-form" class="panel dm-form">
             <label for="dm-name">Campaign ka naam</label>
             <input id="dm-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Reel comments, list 1">
