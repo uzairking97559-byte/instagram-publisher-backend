@@ -380,6 +380,8 @@ function loginSite(seen) {
         return a === "fresh pass1" ? json({ next: "/accounts/login/" }) : json({ next: "/accounts/onetap/" }, true);
       }
       if (req.url === "/saved" || req.url === "/robot") { res.writeHead(204); return res.end(); }
+      // Like Instagram: a logged-in browser is sent away from the login page.
+      if (req.url === "/accounts/login/" && /sessionid=test-session/.test(req.headers.cookie || "")) { res.writeHead(302, { location: "/" }); return res.end(); }
       const [route] = req.url.split("?");
       const page = pages[route];
       res.writeHead(page ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
