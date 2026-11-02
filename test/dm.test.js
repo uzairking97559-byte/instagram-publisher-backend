@@ -93,6 +93,11 @@ function fakeDriver(results = {}) {
           answers.push(item);
           return inbox.answerResults[item.message] || { status: "sent" };
         },
+        // The account scan: inbox.who(cdpUrl) decides, or the inbox's account.
+        whoAmI: async () => {
+          checks.push({ scan: cdpUrl });
+          return inbox.who ? inbox.who(cdpUrl) : { status: "ok", account: inbox.account };
+        },
         login: async ({ username, password }) => { account.typed.push([username, password]); return account.result; },
         enterCode: async ({ code }) => { account.codes.push(code); return account.codeResult; },
         requestReset: async ({ username }) => { account.resets.push(username); return account.resetResult; },
@@ -157,7 +162,7 @@ test("DM Sender needs sign-in and a Browser Use key", async (t) => {
 test("a campaign saves its list once, without duplicates, and only for people who asked", async (t) => {
   const { h, cookie, create, campaign } = await setup(t);
   const profiles = await h.request("/api/dm/profiles", { cookie });
-  assert.deepEqual(profiles.data.profiles, [{ id: PROFILE, name: "Personal Profile", last_used_at: null }]);
+  assert.deepEqual(profiles.data.profiles, [{ id: PROFILE, name: "Personal Profile", last_used_at: null, account: null }]);
 
   assert.equal((await create({ requested_contact: false })).data.error, "contact_not_confirmed");
   assert.equal((await create({ profile_id: "nope" })).data.error, "invalid_campaign");
@@ -682,7 +687,7 @@ test("replies: read per account between DMs, answered from the website, checked 
 
 test("auto-jawab: the owner's fixed answer goes by itself, once per person; a later message is the owner's", async (t) => {
   const { h, driver, clock, cookie, advance, create, start, tick } = await setup(t);
-  const id = (await create({ usernames: "one\ntwo\nthree", message: "Hi {username}, want details?" })).data.campaign.id;
+  const id = (await create({ usernames: "one\ntwo\nthree\nfour", message: "Hi {username}, want details?" })).data.campaign.id;
   const replies = async () => (await h.request("/api/dm/replies", { cookie })).data;
   const auto = (body) => h.request("/api/dm/auto", { method: "POST", cookie, body });
   // The request starts the worker itself; two more runs make sure the check
@@ -697,6 +702,8 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   // Off by default: the DM, then the inbox, and nothing goes by itself.
   await start(id);
   await tick();
+  // The others got the campaign's DM too (as if on earlier days).
+  await h.db.query("UPDATE dm_targets SET status='sent',sent_at=$1,sent_profile=$2 WHERE username IN ('two','three','four')", [clock.now, PROFILE]);
   let data = await replies();
   assert.deepEqual(data.auto, { on: false, message: "", updated_at: null });
   assert.deepEqual([data.replies.length, data.replies[0].answers.length], [1, 0]);
@@ -714,13 +721,14 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   assert.deepEqual(data.replies[0].answers.map((item) => [item.auto, item.status]), [[true, "sent"]]);
 
   // They write again: no second auto answer, it waits for the owner. Someone
-  // new writes: they get it, after the check that found them.
-  driver.inbox.replies = [said("one", "How much?"), said("two", "Kitna milega?")];
+  // new writes: they get it, after the check that found them. A friend of the
+  // account (never sent a campaign DM) does not.
+  driver.inbox.replies = [said("one", "How much?"), said("two", "Kitna milega?"), said("friend", "Hi bro")];
   await check();
   assert.deepEqual(driver.answers.map((item) => item.username), ["one", "two"]);
   assert.equal(driver.answers[1].message, "Hi two! Saari details ke liye Telegram par message karo: t.me/example");
   data = await replies();
-  assert.deepEqual(Object.fromEntries(data.replies.map((reply) => [reply.username, reply.status])), { one: "new", two: "answered" });
+  assert.deepEqual(Object.fromEntries(data.replies.map((reply) => [reply.username, reply.status])), { one: "new", two: "answered", friend: "new" });
   advance(1000);
   const totals = (await h.request("/api/dm/stats?period=1", { cookie })).data.totals;
   assert.deepEqual([totals.answers_sent, totals.auto_sent], [0, 2], "auto answers are counted apart from the owner's");
@@ -750,6 +758,53 @@ test("auto-jawab: the owner's fixed answer goes by itself, once per person; a la
   assert.equal((await auto({ on: true, message: "Telegram: t.me/example" })).data.queued, 0);
   await tick();
   assert.deepEqual(driver.answers.map((item) => item.message).slice(3), ["Typed by the owner"]);
+});
+
+test("account scan: each Browser Use profile is opened once to see which account it is logged in to", async (t) => {
+  const { h, fake, driver, cookie, create, start, tick } = await setup(t);
+  const empty = crypto.randomUUID();
+  const tanya = crypto.randomUUID();
+  fake.profiles.push({ id: empty, name: "DM 5", lastUsedAt: null }, { id: tanya, name: "DM 6", lastUsedAt: null });
+  const profileOf = (cdpUrl) => fake.browsers.get(cdpUrl.split("/").pop()).body.profileId;
+  driver.inbox.who = (cdpUrl) => ({
+    [PROFILE]: { status: "ok", account: "aiglow.artlab" },
+    [empty]: { status: "blocked", reason: "logged_out", text: null },
+    [tanya]: { status: "ok", account: "tanya.page" }
+  })[profileOf(cdpUrl)];
+  const id = (await create({ usernames: "one\ntwo" })).data.campaign.id;
+  const scan = () => h.request("/api/dm/scan", { method: "POST", cookie, body: {} });
+
+  assert.deepEqual((await h.request("/api/dm/scan", { cookie })).data.scans, []);
+  const asked = await scan();
+  assert.equal(asked.status, 200);
+  assert.deepEqual(asked.data.scans.map((item) => [item.name, item.status]), [["DM 5", "waiting"], ["DM 6", "waiting"], ["Personal Profile", "waiting"]]);
+  assert.equal(asked.data.scanning, true);
+  await tick();
+  let data = (await h.request("/api/dm/scan", { cookie })).data;
+  assert.deepEqual(data.scans.map((item) => [item.name, item.status, item.account]),
+    [["DM 5", "logged_out", null], ["DM 6", "ok", "tanya.page"], ["Personal Profile", "ok", "aiglow.artlab"]]);
+  assert.equal(data.scanning, false);
+  // One browser per profile, each stopped straight after; nothing was sent.
+  assert.equal(fake.calls.filter((call) => call === "POST /api/v4/browsers").length, 3);
+  assert.ok([...fake.browsers.values()].every((browser) => browser.status === "stopped"));
+  assert.deepEqual(driver.sent, []);
+  // The campaign form's list shows each account.
+  const profiles = (await h.request("/api/dm/profiles", { cookie })).data.profiles;
+  assert.deepEqual(Object.fromEntries(profiles.map((item) => [item.name, item.account])),
+    { "Personal Profile": "aiglow.artlab", "DM 5": null, "DM 6": "tanya.page" });
+
+  // A running campaign's open browser is used as it is; an Instagram check
+  // found by the scan stops that campaign, like any other check.
+  await start(id);
+  driver.inbox.who = () => ({ status: "blocked", reason: "challenge", text: "Confirm it's you" });
+  fake.profiles.splice(1);
+  await tick();
+  await scan();
+  await tick();
+  data = (await h.request("/api/dm/scan", { cookie })).data;
+  assert.deepEqual(data.scans.map((item) => [item.name, item.status]), [["Personal Profile", "challenge"]], "profiles gone from Browser Use leave the list");
+  const campaign = (await h.request(`/api/dm/campaigns/${id}`, { cookie })).data.campaign;
+  assert.deepEqual([campaign.status, campaign.pause_reason], ["paused", "challenge"]);
 });
 
 test("inboxes are also read at 16:00, 19:00 and 22:00 India time for accounts that sent DMs lately", async (t) => {

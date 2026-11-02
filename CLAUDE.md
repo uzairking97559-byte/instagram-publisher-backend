@@ -30,7 +30,8 @@ website has three parts (bottom bar on a phone, left rail on a computer):
    **Browser Use** cloud browser profile, driven over the Chrome DevTools Protocol with
    fixed steps (no AI model per message). **Replies** per account, answers typed on the
    website, saved answers, **Auto-jawab** (off by default; the owner's one message sent by
-   itself to each person who writes back, once), **Hisaab** (per account and per message version: reach, replies,
+   itself, once, to each person who writes back after a campaign DM), an **account scan**
+   (which Instagram account each Browser Use profile is logged in to), **Hisaab** (per account and per message version: reach, replies,
    ₹ per reply), and a **Telegram bot** that announces replies, sends the owner's answers
    and posts a morning report of the day before. A second bot, **Workwithme**, talks to
    creators: page link, logo and rules, first Reel approved by the owner, UPI, every Reel

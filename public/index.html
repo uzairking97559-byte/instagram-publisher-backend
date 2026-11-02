@@ -260,6 +260,15 @@
               <div id="account-result" class="dm-note" hidden></div>
             </form>
           </details>
+          <details id="scan-panel" class="add-account">
+            <summary><span class="plus" aria-hidden="true">+</span>Kaunse profile mein kaunsa account? (scan)</summary>
+            <div class="dm-form">
+              <p class="hint">Har Browser Use profile ek-ek karke khulega aur dikhega ki usme kaunsa Instagram account login hai. Har profile ≈ ₹2–3. Koi DM nahi jata, kuch badalta nahi.</p>
+              <button id="scan-start" class="primary" type="button">Sab profile scan karo</button>
+              <p id="scan-status" class="hint" role="status"></p>
+              <div id="scan-list" class="template-list"></div>
+            </div>
+          </details>
           <form id="dm-form" class="panel dm-form">
             <label for="dm-name">Campaign ka naam</label>
             <input id="dm-name" type="text" maxlength="60" required autocomplete="off" placeholder="Jaise: Reel comments, list 1">

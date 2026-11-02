@@ -597,6 +597,19 @@ test("replies: reads who wrote back and what, and sends the owner's answers", { 
   assert.deepEqual(again.replies.map((reply) => reply.username), ["erin", "hana"]);
 });
 
+test("scan: says which account the browser is logged in to, or that it is not", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
+  const { requests, baseUrl } = await serve(t, "threads");
+  const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => session.close());
+  assert.deepEqual(await session.whoAmI(), { status: "ok", account: "aiglow.test" });
+  assert.deepEqual(requests.filter((url) => url.startsWith("/direct/")), ["/direct/inbox/"], "only the inbox page; no chat is opened");
+
+  const gone = await serve(t, "gone");
+  const other = await createInstagramDriver({ baseUrl: gone.baseUrl, timing: FAST }).open(await launchChrome(t));
+  t.after(() => other.close());
+  assert.deepEqual(await other.whoAmI(), { status: "blocked", reason: "logged_out", text: null });
+});
+
 test("inbox: sent away to the home page means no login, not an empty inbox", { skip: !CHROME && "set DM_TEST_CHROME to run" }, async (t) => {
   const { requests, baseUrl } = await serve(t, "gone");
   const session = await createInstagramDriver({ baseUrl, timing: FAST }).open(await launchChrome(t));

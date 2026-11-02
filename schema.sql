@@ -521,3 +521,14 @@ CREATE TABLE IF NOT EXISTS dm_settings (
 );
 ALTER TABLE dm_outbox ADD COLUMN IF NOT EXISTS auto BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE UNIQUE INDEX IF NOT EXISTS dm_outbox_auto_idx ON dm_outbox(reply_id) WHERE auto;
+-- Account scan (lib/dm.js): which Instagram account each Browser Use profile
+-- is logged in to, found by opening it once when the owner asks.
+CREATE TABLE IF NOT EXISTS dm_profile_scans (
+  profile_id UUID PRIMARY KEY,
+  name TEXT,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  account TEXT,
+  detail TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  checked_at TIMESTAMPTZ
+);
