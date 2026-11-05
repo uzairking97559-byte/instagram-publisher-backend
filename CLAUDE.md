@@ -123,13 +123,14 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
   human activity, or help an account avoid being linked to suspended ones. The new-account
   login (Messages → Naya campaign) stops at every Instagram check; the owner does it himself
   (his code, or his own taps relayed from the screenshot). Never store or log the password.
-- Current state (2 Nov 2026): profiles "DM 1" (older account; Instagram asked for a check on
-  1 Nov after the search-limit bug, fixed in #60; owner cleared it; 5-DM test passed 2 Nov),
-  "DM 2" (action-blocked 27 Oct; the owner chose to restart it; warm-up 10/day, no warning
-  since), "DM 4" (logged in from the website 2 Nov; its 5-DM test comes next). "DM 3" is an
-  empty profile from failed logins (delete only if the owner says so). Add more accounts one
-  at a time, each after its own clean 5-DM test. The finder needs a new profile before its
-  first 50-profile test.
+- Current state (6 Nov 2026; the account scan shows which account each profile holds):
+  "DM 1" (older account; check on 1 Nov after the search-limit bug, fixed in #60; warm-up
+  back at 10/day), "DM 2" (action-blocked 27 Oct and again 4 Nov after 16 DMs; the owner
+  keeps it at most 15/day), "DM 3" (logged in from the website 2 Nov, renamed from "DM 4";
+  5-DM test passed 3 Nov), "DM 4" (an old account logged in 3 Nov; 5-DM test passed 3 Nov),
+  "DM 5" (Instagram keeps asking to log in on another device; retry later, not repeatedly).
+  The owner deleted the old empty profile. Add more accounts one at a time, each after its
+  own clean 5-DM test. The finder needs a new profile before its first 50-profile test.
 
 ## Environment variables (names only — values are set in Render)
 
@@ -138,5 +139,5 @@ missing, e.g. on Windows). CI (GitHub Actions, Node 22 and 24) runs them with
 `META_GRAPH_VERSION`, `MEDIA_STORAGE_LIMIT_MB`, `FFMPEG_PATH`, `SKIP_FFMPEG_DOWNLOAD`,
 `BROWSER_USE_API_KEY`, `DM_PROXY_COUNTRY`, `DM_USD_INR`, `DM_SEND_METHOD` (`profile` to send
 from profile pages instead of the inbox), `DM_CHECK_HOURS` (fixed inbox checks, default
-`16,19,22`), `CHECK_INTERVAL_SECONDS`, `TELEGRAM_BOT_TOKEN`,
+`21`), `CHECK_INTERVAL_SECONDS`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_BOT_USERNAME`, `WORKWITHME_BOT_TOKEN`, `WORKWITHME_BOT_USERNAME`, `NODE_ENV`, `PORT`, `RENDER`.

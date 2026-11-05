@@ -807,44 +807,40 @@ test("account scan: each Browser Use profile is opened once to see which account
   assert.deepEqual([campaign.status, campaign.pause_reason], ["paused", "challenge"]);
 });
 
-test("inboxes are also read at 16:00, 19:00 and 22:00 India time for accounts that sent DMs lately", async (t) => {
+test("inboxes are also read once a day at 21:00 India time for accounts that sent DMs in the last 24 hours", async (t) => {
   const { h, fake, driver, clock, create, start, tick } = await setup(t);
   const at = (iso) => { clock.now = new Date(iso); };
   const id = (await create({ usernames: "one" })).data.campaign.id;
   await start(id);
-  await tick(); // the DM, then a look at the inbox in the same browser
+  await tick(); // the DM at 12:00, then a look at the inbox in the same browser
   at("2026-10-18T06:39:30Z");
   await tick(); // nothing left: the campaign completes and its browser closes
   assert.equal(driver.checks.length, 1);
   const opened = () => fake.calls.filter((call) => call === "POST /api/v4/browsers").length;
   assert.equal(opened(), 1);
 
-  // 16:00: one browser just for the inbox, once.
+  // 16:00 and 19:00: no browser is opened any more (each costs an Instagram load).
   at("2026-10-18T10:30:30Z");
   await tick();
-  assert.equal(driver.checks.length, 2);
-  assert.equal(opened(), 2);
-  at("2026-10-18T10:32:00Z");
-  await tick();
-  assert.equal(driver.checks.length, 2, "once per check hour");
-  // More than an hour after 16:00 and before 19:00: nothing.
-  at("2026-10-18T12:10:00Z");
-  await tick();
-  assert.equal(driver.checks.length, 2);
-  // 19:00: again.
   at("2026-10-18T13:31:00Z");
   await tick();
-  assert.equal(driver.checks.length, 3);
-  // An account Instagram logged out is not opened on a schedule.
+  assert.deepEqual([driver.checks.length, opened()], [1, 1]);
+  // 21:00, with Instagram's logout on record: not opened. Fixed within the hour: read once.
   await h.db.query("UPDATE dm_inboxes SET check_status='logged_out' WHERE profile_id=$1", [PROFILE]);
-  at("2026-10-18T16:31:00Z");
+  at("2026-10-18T15:30:30Z");
   await tick();
-  assert.equal(driver.checks.length, 3);
-  // Three days after its last DM, the account is no longer checked on a schedule.
+  assert.equal(driver.checks.length, 1);
   await h.db.query("UPDATE dm_inboxes SET check_status='ok' WHERE profile_id=$1", [PROFILE]);
-  at("2026-10-21T10:31:00Z");
+  at("2026-10-18T15:40:00Z");
   await tick();
-  assert.equal(driver.checks.length, 3);
+  assert.deepEqual([driver.checks.length, opened()], [2, 2]);
+  at("2026-10-18T15:52:00Z");
+  await tick();
+  assert.equal(driver.checks.length, 2, "once per check hour");
+  // The next day's 21:00: no DM in the last 24 hours, so not opened.
+  at("2026-10-19T15:31:00Z");
+  await tick();
+  assert.deepEqual([driver.checks.length, opened()], [2, 2]);
 });
 
 test("a DM Instagram could not deliver is not counted as sent, and its notice is not a reply", async (t) => {
